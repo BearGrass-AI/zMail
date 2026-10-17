@@ -15,7 +15,8 @@ export interface GenerativeProvider {
   readonly name: string;
   /** Can run Anthropic's server-side web search. */
   readonly builtinWebSearch?: boolean;
-  complete(messages: ChatMessage[], opts?: { maxTokens?: number }): Promise<string>;
+  /** effort "low": short, simple prose (one-liners, summaries) where a Claude 5 model needn't think. */
+  complete(messages: ChatMessage[], opts?: { maxTokens?: number; effort?: "low" }): Promise<string>;
   /** One assistant turn with tools: text, tool calls, or both. */
   chat(system: string, messages: AgentMessage[], tools: ToolDef[], opts?: { maxTokens?: number; webSearch?: boolean }): Promise<AgentTurn>;
 }
@@ -34,6 +35,15 @@ export function webSearchTool(): Record<string, unknown> {
 /** `${baseUrl}|${model}` pairs whose org turned Claude's web search off; remembered for the session
  *  so later steps don't pay a failed request first. */
 const builtinSearchOff = new Set<string>();
+
+/**
+ * Newer Claude models think by default, and thinking counts toward max_tokens: a short budget (a
+ * one-liner's 50) can run out while thinking and return no text. This much more is left for it.
+ * It's only a cap; unused room costs nothing.
+ */
+const THINKING_ROOM = 2048;
+/** Claude 5 models, which all take output_config.effort (older ones may reject it). */
+const CLAUDE_5 = /^claude-[a-z]+-5(?:-|$)/;
 
 export interface HttpGenerativeConfig {
   provider: LlmTypeId;
@@ -55,7 +65,7 @@ export class HttpGenerativeProvider implements GenerativeProvider {
     this.name = cfg.model;
   }
 
-  async complete(messages: ChatMessage[], opts?: { maxTokens?: number }) {
+  async complete(messages: ChatMessage[], opts?: { maxTokens?: number; effort?: "low" }) {
     const api = apiBase(this.cfg.provider, this.cfg.baseUrl);
     const maxTokens = opts?.maxTokens ?? 1024;
 
@@ -65,13 +75,17 @@ export class HttpGenerativeProvider implements GenerativeProvider {
         headers: { "x-api-key": this.cfg.apiKey ?? "", "anthropic-version": ANTHROPIC_VERSION },
         body: {
           model: this.cfg.model,
-          max_tokens: maxTokens,
+          max_tokens: maxTokens + THINKING_ROOM,
+          ...(opts?.effort && CLAUDE_5.test(this.cfg.model) ? { output_config: { effort: opts.effort } } : {}),
           ...(system ? { system } : {}),
           messages: messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content })),
         },
       });
       if (res.stop_reason === "refusal") throw new Error("The model declined this request.");
-      return res.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+      const text = res.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+      // Cut off before any text: a failure, not an empty answer (a row would show the email's own words instead).
+      if (!text && res.stop_reason === "max_tokens") throw new Error("The model used its whole token budget thinking and returned no text.");
+      return text;
     }
 
     const res = await request<{ choices: { message: { content: string | null }; finish_reason?: string }[] }>(
@@ -150,7 +164,7 @@ export function summarize(p: GenerativeProvider, email: Email) {
         content: `Summarize this email in 2-3 sentences. Lead with what it wants from the reader, if anything.\n\nFrom: ${email.from.name} <${email.from.address}>\nSubject: ${email.subject}\n\n${email.text.slice(0, 6000)}`,
       },
     ],
-    { maxTokens: 200 },
+    { maxTokens: 200, effort: "low" },
   );
 }
 
@@ -165,7 +179,7 @@ export function oneLiner(p: GenerativeProvider, email: Email) {
         content: `In one line (max 18 words, no preamble), say what this email wants from the reader and any deadline.\n\nFrom: ${email.from.name}\nSubject: ${email.subject}\n\n${email.text.slice(0, 3000)}`,
       },
     ],
-    { maxTokens: 50 },
+    { maxTokens: 50, effort: "low" },
     )
     .then((line) => (isRefusal(line) ? "" : line));
 }
