@@ -188,13 +188,15 @@ fn read_sources(
         json_or_empty("m.json")
     );
     let mut stmt = conn.prepare_cached(&sql).map_err(|e| e.to_string())?;
+    // Read lossily: one email whose text isn't valid UTF-8 would otherwise fail every batch it's
+    // in, and stay queued (newest first) so the indexer never got past it.
     stmt.query_map(p, |r| {
         Ok(Source {
             id: r.get(0)?,
-            subject: r.get(1)?,
-            name: r.get(2)?,
-            address: r.get(3)?,
-            body: r.get(4)?,
+            subject: db::lossy_text(r, 1)?,
+            name: db::lossy_text(r, 2)?,
+            address: db::lossy_text(r, 3)?,
+            body: db::lossy_text(r, 4)?,
         })
     })
     .map_err(|e| e.to_string())?
@@ -788,6 +790,31 @@ pub mod tests {
             .0;
         assert_eq!(best, 2);
         assert!(passage_text(&src, text::PASSAGES_MAX).is_none());
+    }
+
+    #[test]
+    fn a_lone_surrogate_row_is_indexed_not_retried() {
+        let mut conn = mem();
+        // Half an emoji, as JSON.stringify writes it: `->>` decodes it to bytes that aren't UTF-8.
+        let bad = CachedMessage {
+            json: r#"{"id":"bad","from":{"name":"Sender","address":"s@example.com"},"subject":"Cut","snippet":"","text":"half \ud83d"}"#.into(),
+            ..mail("bad", "inbox", "2026-10-02", "", "")
+        };
+        put_messages_conn(
+            &mut conn,
+            "a",
+            &[bad, mail("old", "inbox", "2026-10-01", "Old", "old words")],
+        )
+        .unwrap();
+        install(&conn).unwrap();
+        let batch = next_batch(&conn, 16).unwrap();
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0].subject.as_deref(), Some("Cut"));
+        assert!(batch[0].body.as_deref().unwrap().starts_with("half "));
+        assert_eq!(sources(&conn, &[batch[0].id]).unwrap().len(), 1);
+        // Both are embedded and leave the queue, so the indexer moves past the bad one.
+        assert_eq!(index_all(&mut conn, &FakeEmbed::default()), 2);
+        assert_eq!(count(&conn, "vec_pending"), 0);
     }
 
     #[test]

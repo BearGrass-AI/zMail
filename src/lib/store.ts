@@ -25,6 +25,7 @@ import { AUTO_REPLY_MODEL, autoReplyTriage, isAutoReply } from "@/lib/mail/auto-
 import { NeedsPermissionError, type AutoReply } from "@/lib/mail/auto-replies";
 import { decisionProvider, generativeProvider } from "@/lib/ai/providers";
 import { isDateCandidate } from "@/lib/date-candidates";
+import { clipText } from "@/lib/mail/clip-text";
 import { useSettings } from "@/lib/settings";
 import { extractDates } from "@/lib/ai/dates";
 import { sectionsKey, type MailSection } from "@/lib/sections";
@@ -152,7 +153,7 @@ const loadedBodies: string[] = [];
 /** A full row back to the slim shape Rust's SLIM_JSON makes for list rows. */
 export function slimRow(e: Email): Email {
   const { html: _, ...rest } = e;
-  return { ...rest, text: e.text.slice(0, 8000), bodyTrimmed: true };
+  return { ...rest, text: clipText(e.text, 8000), bodyTrimmed: true };
 }
 /** Incoming synced/backfilled rows, slimmed except the open email, the reply source and bodies ensureBody still keeps. */
 export function slimIncoming(rows: Email[], s: { selectedId: string | null; compose: { replyTo?: string } | null }): Email[] {
