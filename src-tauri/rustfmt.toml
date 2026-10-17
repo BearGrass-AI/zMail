@@ -1,0 +1,2 @@
+# Default width: it leaves the newer modules (notify.rs, maps.rs, lib.rs) untouched.
+max_width = 100

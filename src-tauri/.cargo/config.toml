@@ -1,0 +1,3 @@
+# Dev runs go through scripts/dev-run.sh, which signs the debug binary with a stable identity.
+[target.aarch64-apple-darwin]
+runner = "scripts/dev-run.sh"

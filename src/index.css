@@ -1,0 +1,413 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Geist Variable', system-ui, sans-serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --radius: 0.625rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+}
+/* ---------------------------------------------------------------------------
+   zMail surfaces. --shell is the window chrome behind the panes; --pane is the
+   card surface. Palette hues (--h-*) are set at runtime by lib/theme.ts.
+   ------------------------------------------------------------------------- */
+
+@theme inline {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --color-shell: var(--shell);
+  --color-pane: var(--pane);
+  --color-pane-2: var(--pane-2);
+  --color-hairline: var(--hairline);
+}
+
+:root {
+  --h-accent: 255;
+  --chroma: 0.16;
+  --shell: oklch(0.945 0.006 var(--h-accent));
+  --pane: oklch(1 0 0);
+  --pane-2: oklch(0.975 0.004 var(--h-accent));
+  --hairline: oklch(0.2 0.01 var(--h-accent) / 8%);
+  --primary: oklch(0.55 var(--chroma) var(--h-accent));
+  --ring: oklch(0.6 var(--chroma) var(--h-accent));
+  --pane-shadow: 0 1px 2px oklch(0 0 0 / 4%), 0 8px 24px -12px oklch(0 0 0 / 10%);
+}
+
+/* Native controls (selects, date fields, checkboxes, scrollbars) follow the app's theme,
+   including an in-app Light or Dark choice, not just the OS. The email frame sets its own. */
+:root { color-scheme: light; }
+:root.dark { color-scheme: dark; }
+
+/* Bucket colors follow the palette. */
+:root {
+  --bucket-needs_you: oklch(0.63 0.2 var(--h-needs_you));
+  --bucket-worth_skim: oklch(0.6 0.17 var(--h-worth_skim));
+  --bucket-ready_archive: oklch(0.64 0.15 var(--h-ready_archive));
+}
+
+/* macOS-style menus: accent highlight with white text. */
+[data-slot="context-menu-item"][data-highlighted],
+[data-slot="context-menu-sub-trigger"][data-highlighted],
+[data-slot="context-menu-sub-trigger"][data-popup-open],
+[data-slot="dropdown-menu-item"][data-highlighted],
+[data-slot="dropdown-menu-sub-trigger"][data-highlighted] {
+  background: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+}
+[data-slot="context-menu-item"][data-highlighted] *,
+[data-slot="context-menu-sub-trigger"][data-highlighted] *,
+[data-slot="context-menu-sub-trigger"][data-popup-open] *,
+[data-slot="dropdown-menu-item"][data-highlighted] * {
+  color: inherit !important;
+}
+[data-slot="context-menu-content"], [data-slot="dropdown-menu-content"] {
+  font-size: 13px;
+}
+[data-slot="context-menu-item"], [data-slot="context-menu-sub-trigger"], [data-slot="dropdown-menu-item"] {
+  font-size: 13px; min-height: 26px;
+}
+
+.dark {
+  --shell: oklch(0.17 0.008 var(--h-accent));
+  --pane: oklch(0.215 0.008 var(--h-accent));
+  --pane-2: oklch(0.245 0.008 var(--h-accent));
+  --hairline: oklch(1 0 0 / 8%);
+  --popover: oklch(0.25 0.008 var(--h-accent));
+  --primary: oklch(0.62 var(--chroma) var(--h-accent));
+  --primary-foreground: oklch(0.99 0 0);
+  --pane-shadow: 0 1px 0 oklch(1 0 0 / 4%) inset, 0 8px 24px -12px oklch(0 0 0 / 50%);
+}
+
+/* Translucent: the shell lets native vibrancy through; panes are frosted. */
+.translucent {
+  --shell: transparent;
+  --pane: oklch(1 0 0 / 66%);
+  --pane-2: oklch(1 0 0 / 45%);
+  --popover: oklch(0.99 0 0 / 82%);
+}
+.translucent.dark {
+  --pane: oklch(0.2 0.01 var(--h-accent) / 58%);
+  --pane-2: oklch(0.25 0.01 var(--h-accent) / 45%);
+  --popover: oklch(0.24 0.01 var(--h-accent) / 82%);
+}
+.translucent .pane,
+.translucent [data-slot="popover-content"],
+.translucent [data-slot="dropdown-menu-content"],
+.translucent [data-slot="dropdown-menu-sub-content"],
+.translucent [data-slot="context-menu-content"],
+.translucent [data-slot="context-menu-sub-content"],
+.translucent [data-slot="select-content"],
+.translucent [data-slot="dialog-content"] {
+  backdrop-filter: blur(28px) saturate(1.6);
+}
+
+/* Reduce transparency (lib/reduce-transparency.ts sets the class; Increase contrast turns it on
+   too): the Translucent theme's surfaces go solid and nothing is frosted. */
+.reduce-transparency.translucent {
+  --shell: oklch(0.945 0.006 var(--h-accent));
+  --pane: oklch(1 0 0);
+  --pane-2: oklch(0.975 0.004 var(--h-accent));
+  --popover: oklch(1 0 0);
+}
+.reduce-transparency.translucent.dark {
+  --shell: oklch(0.17 0.008 var(--h-accent));
+  --pane: oklch(0.215 0.008 var(--h-accent));
+  --pane-2: oklch(0.245 0.008 var(--h-accent));
+  --popover: oklch(0.25 0.008 var(--h-accent));
+}
+.reduce-transparency .pane,
+.reduce-transparency .shell-blur,
+.reduce-transparency [data-slot="popover-content"],
+.reduce-transparency [data-slot="dropdown-menu-content"],
+.reduce-transparency [data-slot="dropdown-menu-sub-content"],
+.reduce-transparency [data-slot="context-menu-content"],
+.reduce-transparency [data-slot="context-menu-sub-content"],
+.reduce-transparency [data-slot="select-content"],
+.reduce-transparency [data-slot="dialog-content"],
+.reduce-transparency [data-slot="dialog-overlay"] {
+  backdrop-filter: none;
+}
+
+html, body, #root { height: 100%; }
+html.in-tauri.translucent, html.in-tauri.translucent body { background: transparent; }
+body {
+  background: var(--shell);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+/* Outside Tauri (browser preview) fake the desktop so translucency reads. */
+html.translucent:not(.in-tauri) body {
+  background:
+    radial-gradient(1200px 600px at 20% 10%, oklch(0.85 0.08 230), transparent 60%),
+    radial-gradient(900px 500px at 85% 80%, oklch(0.8 0.1 260), transparent 60%),
+    linear-gradient(160deg, oklch(0.75 0.12 245), oklch(0.88 0.05 220));
+}
+html.translucent.dark:not(.in-tauri) body {
+  background:
+    radial-gradient(1200px 600px at 20% 10%, oklch(0.35 0.1 270), transparent 60%),
+    radial-gradient(900px 500px at 85% 80%, oklch(0.3 0.12 320), transparent 60%),
+    linear-gradient(160deg, oklch(0.2 0.05 260), oklch(0.15 0.04 290));
+}
+html.translucent:not(.in-tauri) .shell-blur { backdrop-filter: blur(40px) saturate(1.4); background: oklch(1 0 0 / 30%); }
+html.translucent.dark:not(.in-tauri) .shell-blur { background: oklch(0 0 0 / 30%); }
+html.reduce-transparency.translucent body,
+html.reduce-transparency.translucent.dark body { background: var(--shell); }
+html.reduce-transparency.translucent .shell-blur,
+html.reduce-transparency.translucent.dark .shell-blur { background: transparent; }
+
+.pane {
+  background: var(--pane);
+  box-shadow: var(--pane-shadow);
+  border: 1px solid var(--hairline);
+}
+
+/* Category / bucket tinting: set --h on an element, then use these. */
+.tint { --tint: oklch(0.6 var(--chroma) var(--h, var(--h-accent))); }
+.dark .tint { --tint: oklch(0.74 var(--chroma) var(--h, var(--h-accent))); }
+.tint-text { color: var(--tint); }
+.tint-soft { background: color-mix(in oklch, var(--tint) 13%, transparent); }
+.tint-solid { background: var(--tint); color: white; }
+.dark .tint-solid { color: oklch(0.15 0 0); }
+.tint-ring { box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--tint) 30%, transparent); }
+
+/* Tauri drag region for the overlay title bar. */
+.drag { -webkit-app-region: drag; app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; app-region: no-drag; }
+
+.selectable { user-select: text; cursor: auto; }
+
+/* Reduced motion: fewer, gentler animations — fades and colour changes stay, movement goes. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    --tw-enter-scale: 1 !important;
+    --tw-enter-translate-x: 0 !important;
+    --tw-enter-translate-y: 0 !important;
+    --tw-exit-scale: 1 !important;
+    --tw-exit-translate-x: 0 !important;
+    --tw-exit-translate-y: 0 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Increase contrast: defined edges, and secondary text at 4.5:1 or more on every surface.
+   Lighter grays (/25–/45) become 65%, mid grays (/50–/65) 75%; their order stays. */
+@media (prefers-contrast: more) {
+  :root {
+    --hairline: oklch(0.2 0.01 var(--h-accent) / 32%);
+    --border: oklch(0.2 0 0 / 32%);
+    --input: oklch(0.2 0 0 / 40%);
+    --muted-foreground: oklch(0.44 0 0);
+  }
+  :root.dark {
+    --hairline: oklch(1 0 0 / 32%);
+    --border: oklch(1 0 0 / 32%);
+    --input: oklch(1 0 0 / 40%);
+    --muted-foreground: oklch(0.8 0 0);
+  }
+}
+/* In the utilities layer, after Tailwind's own, so hover and other states still win over these. */
+@layer utilities {
+  @media (prefers-contrast: more) {
+    [class~="text-foreground/25"], [class~="text-foreground/30"], [class~="text-foreground/35"],
+    [class~="text-foreground/40"], [class~="text-foreground/45"],
+    [class~="placeholder:text-foreground/30"]::placeholder,
+    [class~="placeholder:text-foreground/35"]::placeholder,
+    [class~="placeholder:text-foreground/40"]::placeholder {
+      color: color-mix(in oklab, var(--foreground) 65%, transparent);
+    }
+    [class~="text-foreground/50"], [class~="text-foreground/55"], [class~="text-foreground/60"],
+    [class~="text-foreground/65"] {
+      color: color-mix(in oklab, var(--foreground) 75%, transparent);
+    }
+    [class~="ring-foreground/10"] {
+      --tw-ring-color: color-mix(in oklab, var(--foreground) 32%, transparent);
+    }
+  }
+}
+
+.kbd {
+  display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 4px; font: 600 10px/1 -apple-system, system-ui, sans-serif;
+  background: color-mix(in oklch, var(--foreground) 6%, transparent);
+  border: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+}
+
+/* Gradient icon tiles (sidebar, sections, pills). */
+.tint-grad {
+  background: linear-gradient(140deg, oklch(0.78 var(--chroma) var(--h, var(--h-accent))), oklch(0.6 calc(var(--chroma) + 0.04) var(--h, var(--h-accent))));
+  color: white;
+}
+.tint-chip { background: color-mix(in oklch, var(--tint) 15%, transparent); color: var(--tint); }
+.dark .tint-chip { background: color-mix(in oklch, var(--tint) 16%, transparent); }
+
+/* Today hero card. */
+.hero-card {
+  background:
+    radial-gradient(520px 240px at 88% -20%, color-mix(in oklch, var(--bucket-needs_you) 26%, transparent), transparent 62%),
+    radial-gradient(420px 280px at -5% 125%, color-mix(in oklch, oklch(0.62 0.16 var(--h-accent)) 24%, transparent), transparent 62%),
+    var(--pane-2);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.hero-pill {
+  background: color-mix(in oklch, var(--foreground) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.dark .hero-pill { background: oklch(0 0 0 / 28%); }
+
+/* Calendar event blocks. */
+.cal-ev {
+  --ev: oklch(0.62 0.15 var(--h));
+  background: color-mix(in oklch, var(--ev) 16%, var(--pane));
+  border-left: 3px solid var(--ev);
+  color: oklch(0.38 0.1 var(--h));
+}
+.dark .cal-ev {
+  --ev: oklch(0.7 0.15 var(--h));
+  background: color-mix(in oklch, var(--ev) 18%, var(--pane));
+  color: oklch(0.88 0.06 var(--h));
+}
+
+/* Assistant replies (Markdown): compact, fits the 340px panel. */
+.assistant-md > * + * { margin-top: 0.5em; }
+.assistant-md ul, .assistant-md ol { padding-left: 1.25em; }
+.assistant-md ul { list-style: disc; }
+.assistant-md ol { list-style: decimal; }
+.assistant-md a { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in oklab, currentColor 40%, transparent); text-underline-offset: 2px; }
+.assistant-md code { font-size: 0.9em; padding: 0 0.25em; border-radius: 4px; background: var(--color-pane-2); }
+.assistant-md pre { overflow-x: auto; padding: 0.5em; border-radius: 8px; background: var(--color-pane-2); }
+.assistant-md blockquote { padding-left: 0.75em; box-shadow: inset 2px 0 0 var(--hairline); color: color-mix(in oklab, currentColor 70%, transparent); }
+.assistant-md h3, .assistant-md h4 { font-weight: 600; }
+.assistant-md .cite { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-inline: 1px; border-radius: 4px; background: color-mix(in oklab, var(--color-primary) 15%, transparent); color: var(--color-primary); font-size: 9.5px; font-weight: 600; font-variant-numeric: tabular-nums; vertical-align: super; line-height: 1; cursor: pointer; }
+.assistant-md .md-table { overflow-x: auto; max-width: 100%; scrollbar-width: thin; scrollbar-color: color-mix(in oklab, currentColor 25%, transparent) transparent; }
+.assistant-md table { width: 100%; min-width: 100%; border-collapse: collapse; font-size: 12.5px; line-height: 1.45; }
+.assistant-md th, .assistant-md td { padding: 6px 8px; border: 0; border-bottom: 1px solid var(--hairline); text-align: left; vertical-align: top; }
+.assistant-md tbody tr:last-child td { border-bottom: 0; }
+.assistant-md th { font-size: 11px; font-weight: 600; color: color-mix(in oklab, currentColor 60%, transparent); background: color-mix(in oklab, var(--color-pane-2) 60%, transparent); }
+.assistant-md th:first-child, .assistant-md td:first-child { font-weight: 600; }
+.assistant-md td:first-child { min-width: 16ch; max-width: 40%; overflow-wrap: anywhere; }
+.assistant-md th.num, .assistant-md td.num, .assistant-md th[align="right"], .assistant-md td[align="right"] { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
