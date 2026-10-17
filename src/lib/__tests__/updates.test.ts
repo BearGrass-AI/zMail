@@ -2,10 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 
-const h = vi.hoisted(() => ({ on: true, check: vi.fn(), relaunch: vi.fn() }));
-vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => h.on }));
+const h = vi.hoisted(() => ({ on: true, check: vi.fn(), invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => h.on, invoke: h.invoke }));
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: h.check }));
-vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: h.relaunch }));
 
 type Updates = typeof import("@/lib/updates");
 let u: Updates;
@@ -34,8 +33,8 @@ const status = () => u.useUpdates.getState().status;
 beforeEach(async () => {
   h.on = true;
   h.check.mockReset();
-  h.relaunch.mockReset();
-  h.relaunch.mockResolvedValue(undefined);
+  h.invoke.mockReset();
+  h.invoke.mockResolvedValue(undefined);
   vi.stubEnv("DEV", false);
   localStorage.clear();
   // The module holds the pending update and in-flight work, so each test gets a fresh copy.
@@ -217,9 +216,10 @@ describe("installUpdate", () => {
     warn.mockRestore();
   });
 
-  it("relaunches through the process plugin", async () => {
+  // Rust reopens zMail once this copy has quit, so the Dock doesn't show the new one as a second icon.
+  it("relaunches through zMail's own command, not the process plugin's restart", async () => {
     await u.relaunch();
-    expect(h.relaunch).toHaveBeenCalledTimes(1);
+    expect(h.invoke).toHaveBeenCalledExactlyOnceWith("relaunch");
   });
 });
 

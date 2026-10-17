@@ -6,6 +6,7 @@ mod mac_contacts;
 mod maps;
 mod notify;
 mod oauth;
+mod relaunch;
 mod person_photo;
 mod secrets;
 mod semantic;
@@ -89,6 +90,7 @@ pub fn run() {
             http::http_request,
             display::reduce_transparency,
             display::full_user_name,
+            relaunch::relaunch,
             secrets::secret_get,
             secrets::secret_set,
             secrets::secret_delete,

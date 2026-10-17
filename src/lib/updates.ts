@@ -3,8 +3,7 @@
 // that into a small store the About page reads. It never installs on its own and never shows UI:
 // automatic checks only find out whether an update exists.
 
-import { isTauri } from "@tauri-apps/api/core";
-import { relaunch as relaunchProcess } from "@tauri-apps/plugin-process";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -212,9 +211,12 @@ export function installUpdate(onProgress?: (p: UpdateProgress) => void): Promise
   return installing;
 }
 
-/** Quits and reopens zMail, which then runs the installed version. */
+/**
+ * Quits and reopens zMail, which then runs the installed version. Rust reopens it only once this
+ * copy has quit (Tauri's own restart started the new one first, which the Dock showed as a second icon).
+ */
 export async function relaunch(): Promise<void> {
-  await relaunchProcess();
+  await invoke("relaunch");
 }
 
 let started = false;
