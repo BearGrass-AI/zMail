@@ -38,6 +38,7 @@ const { Composer } = await import("@/components/mail/composer");
 const { useAssistant } = await import("@/lib/ai/assistant/state");
 const { executeTool } = await import("@/lib/ai/assistant/tools");
 const { realDeps } = await import("@/lib/ai/assistant/deps");
+const { runConfirm } = await import("@/lib/ai/assistant/modules/confirm");
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -139,14 +140,17 @@ describe("Composer session ownership", () => {
     expect(useMail.getState().composeView?.subject).toBe("Draft A");
     const sessionA = useMail.getState().composeSession;
 
-    const result = executeTool({ id: "c1", name: "attach_to_draft", args: { email_id: "m1" } }, realDeps());
+    await executeTool({ id: "c1", name: "attach_to_draft", args: { email_id: "m1" } }, realDeps());
+    // The user approves the card for Draft A; the files download on Apply.
+    const cardId = useAssistant.getState().items.at(-1)!.id;
+    const applied = runConfirm(cardId);
     await act(async () => {});
     await openOver({ mode: "blank", prefill: { subject: "Draft B" } });
     await act(async () => download.resolve("ZGF0YQ=="));
-    const r = await result;
+    await applied;
     await act(async () => {});
 
-    expect(JSON.stringify(r.content)).toContain("changed");
+    expect(useAssistant.getState().items.at(-1)).toMatchObject({ card: { status: "failed", error: "That draft isn't open anymore. Nothing was changed." } });
     expect(document.body.textContent).not.toContain("budget.pdf");
     expect(subjectInput("Draft B")).toBeDefined();
 

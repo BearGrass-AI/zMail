@@ -10,6 +10,9 @@ const { useAssistant } = await import("@/lib/ai/assistant/state");
 const { executeTool } = await import("@/lib/ai/assistant/tools");
 const { addEvent, confirmBulk, resumeBulk, undoBulk, undoFromToast, reviewSet, bulkFollowUp } = await import("@/lib/ai/assistant/cards");
 import type { ToolDeps } from "@/lib/ai/assistant/tools";
+import type { PeopleDeps } from "@/lib/ai/assistant/modules/people";
+const { dismissConfirm, runConfirm } = await import("@/lib/ai/assistant/modules/confirm");
+const { expectRedraft } = await import("@/lib/ai/assistant/redraft");
 
 const mk = (i: number, over: Partial<Email> = {}) =>
   ({ id: `m${i}`, accountId: "g", threadId: `m${i}`, folderId: "g:INBOX", from: { name: "Amazon.com", address: "ship@amazon.com" }, to: [], subject: i % 4 ? "Shipped: socks" : "Your receipt", snippet: "snip", text: "body ".repeat(3000), date: "2025-05-01T00:00:00Z", unread: true, starred: false, labels: [], partial: true, ...over }) as Email;
@@ -20,7 +23,19 @@ function fakeDeps(over: Partial<ToolDeps> = {}): ToolDeps & { bulkCalls: unknown
   const opened: unknown[] = [];
   const fetched: string[] = [];
   const edits: { subject?: string; body?: string }[] = [];
-  return {
+  // Draft edits go through the people module, against the draft this fake's view shows.
+  const people: PeopleDeps = {
+    search: async () => [],
+    view: () => self.view().compose,
+    session: () => (self.view().compose ? 1 : null),
+    editCompose: (patch) => void edits.push(patch),
+    scheduled: () => false,
+    ensureEmail: async () => {
+      throw new Error("not used");
+    },
+    attachmentData: async () => "",
+  };
+  const self: ReturnType<typeof fakeDeps> = {
     edits,
     bulkCalls,
     opened,
@@ -34,7 +49,6 @@ function fakeDeps(over: Partial<ToolDeps> = {}): ToolDeps & { bulkCalls: unknown
       return { ...all.find((e) => e.id === ref.id)!, partial: undefined };
     },
     view: () => ({ open: undefined, checked: [], listLabel: "Inbox", setId: null, compose: null }),
-    editCompose: (patch) => void edits.push(patch),
     kinds: async (rows) => Object.fromEntries(rows.map((e) => [e.id, e.subject.startsWith("Shipped") ? "order_delivery" : "receipt_bill"])),
     bulk: async (emails, op) => {
       bulkCalls.push({ ids: emails.map((e) => e.id), op });
@@ -60,9 +74,10 @@ function fakeDeps(over: Partial<ToolDeps> = {}): ToolDeps & { bulkCalls: unknown
     openLink: () => {
       throw new Error("must not open");
     },
-    ext: {},
+    ext: { people },
     ...over,
   };
+  return self;
 }
 const call = (name: string, args: Record<string, unknown> | null) => ({ id: name, name, args });
 const ref = (e: Email) => ({ id: e.id, accountId: e.accountId });
@@ -220,8 +235,40 @@ describe("reading, events and drafts", () => {
     const deps = fakeDeps({ view: () => ({ checked: [], listLabel: "Inbox", setId: null, compose: { to: "", cc: "", bcc: "", subject: "S", body: "b" } }) });
     expect(JSON.stringify(await executeTool(call("edit_draft", {}), deps))).toContain("edit_draft needs subject or body");
     const res = (await executeTool(call("edit_draft", { subject: "New", body: "Fixed" }), deps)).content as { status: string };
-    expect(res.status).toBe("edited");
+    expect(res.status).toBe("awaiting_confirmation");
+    // Nothing changes until the user applies the card, which shows every field it writes.
+    expect(deps.edits).toEqual([]);
+    const item = useAssistant.getState().items.at(-1)!;
+    expect(item).toMatchObject({ kind: "card", card: { type: "confirm", module: "people", action: "edit_draft", preview: { fields: [{ label: "New subject", value: "New" }], body: "Fixed" } } });
+    await runConfirm(item.id, deps);
     expect(deps.edits).toEqual([{ subject: "New", body: "Fixed" }]);
+  });
+
+  it("a dismissed edit_draft card leaves the draft as it was", async () => {
+    const deps = fakeDeps({ view: () => ({ checked: [], listLabel: "Inbox", setId: null, compose: { to: "", cc: "", bcc: "", subject: "S", body: "Pay to account 1" } }) });
+    await executeTool(call("edit_draft", { body: "Pay to account 2" }), deps);
+    const id = useAssistant.getState().items.at(-1)!.id;
+    dismissConfirm(id);
+    await runConfirm(id, deps);
+    expect(deps.edits).toEqual([]);
+  });
+
+  it("the rewrite the user asked for with Redraft goes straight in, once", async () => {
+    const deps = fakeDeps({ view: () => ({ checked: [], listLabel: "Inbox", setId: null, compose: { to: "", cc: "", bcc: "", subject: "S", body: "b" } }) });
+    const status = async (body: string) => ((await executeTool(call("edit_draft", { body }), deps)).content as { status: string }).status;
+    const done = expectRedraft(1);
+    expect(await status("Reworked")).toBe("edited");
+    expect(deps.edits).toEqual([{ body: "Reworked", redraft: true }]);
+    // A second edit in the same turn is the model's own idea: a card.
+    expect(await status("Again")).toBe("awaiting_confirmation");
+    done();
+    // A Redraft of another draft doesn't let edits through to this one, nor does one that has ended.
+    const other = expectRedraft(2);
+    expect(await status("Other")).toBe("awaiting_confirmation");
+    other();
+    expectRedraft(1)();
+    expect(await status("Late")).toBe("awaiting_confirmation");
+    expect(deps.edits).toHaveLength(1);
   });
 
   it("there is no send tool", async () => {

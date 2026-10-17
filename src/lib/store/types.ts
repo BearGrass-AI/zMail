@@ -32,6 +32,8 @@ export interface ComposeEditPatch {
   cc?: string;
   bcc?: string;
   addFiles?: { filename: string; mimeType: string; base64: string; size: number }[];
+  /** The rewrite the user asked for with Redraft with AI (not an assistant change they approved on a card). */
+  redraft?: boolean;
 }
 /** `session` is the compose session it was made for; the composer ignores edits for another one. */
 export type ComposeEdit = ComposeEditPatch & { seq: number; session: number };
@@ -303,6 +305,12 @@ export interface MailState {
   sendScheduledNow: (id: string) => Promise<void>;
   /** Unschedule and reopen it in the composer, keeping its time. */
   editScheduled: (id: string) => Promise<void>;
+  /**
+   * A reopened scheduled draft is about to be saved with changes: take it off the schedule first, so only what the
+   * user pressed Schedule on goes out by itself. Resolves to a function that puts it back (for a save that failed),
+   * or null when it isn't scheduled.
+   */
+  withdrawScheduled: (draftId: string) => Promise<(() => void) | null>;
   /** Send whatever local scheduled mail is due (one run at a time). */
   runDueScheduled: () => Promise<void>;
   /** Attachment bytes (standard base64) from the email's provider. */

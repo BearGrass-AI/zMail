@@ -28,7 +28,6 @@ const deps = {
   loadHeaders: async (refs: { id: string }[]) => refs.map((r) => all.find((e) => e.id === r.id)!),
   getEmail: async (r: { id: string }) => all.find((e) => e.id === r.id)!,
   view: () => ({ open: all[0], checked: [], listLabel: "Inbox", setId: null, compose: null }),
-  editCompose: () => {},
   kinds: async (rows: Email[]) => Object.fromEntries(rows.map((e) => [e.id, e.subject.startsWith("Shipped") ? "order_delivery" : "receipt_bill"])),
   bulk: async () => ({ done: 0, skipped: 0, failed: [], undo: [] }),
   undo: async () => ({ done: 0, skipped: 0, failed: [], undo: [] }),

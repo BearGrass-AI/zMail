@@ -282,7 +282,6 @@ export function realDeps(): ToolDeps {
     },
 
     openCompose: (c) => mail().openCompose(c),
-    editCompose: (patch) => mail().editCompose(patch),
     defaultCalendar: () => {
       const s = mail();
       return defaultCalendarFor(s, s.accounts.find((a) => a.kind !== "mock")?.id ?? s.accounts[0]?.id ?? "") || undefined;
