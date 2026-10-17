@@ -6,8 +6,8 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::{RngExt, distr::Alphanumeric};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
-use std::net::{Ipv6Addr, SocketAddr, TcpListener};
+use std::io::{Read, Write};
+use std::net::{Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -180,33 +180,42 @@ pub fn build_auth_url(
     url.to_string()
 }
 
-/// Parse `GET /?code=...&state=... HTTP/1.1` from the loopback request line.
-pub fn parse_callback(request_line: &str) -> Result<(String, String), String> {
-    let path = request_line
-        .split_whitespace()
-        .nth(1)
-        .ok_or("malformed callback request")?;
-    let url = url::Url::parse(&format!("http://127.0.0.1{path}")).map_err(|e| e.to_string())?;
+/// Whether two strings are equal, taking as long for a near miss as for a far one.
+fn same(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0, |d, (x, y)| d | (x ^ y)) == 0
+}
+
+/// The code (or the provider's decline) in `GET /?code=...&state=... HTTP/1.1`, the loopback
+/// request line. `None` unless it carries this sign-in's `state`: only the provider's redirect
+/// knows it, so any other request to the port isn't the callback.
+pub fn parse_callback(request_line: &str, expected_state: &str) -> Option<Result<String, String>> {
+    let path = request_line.split_whitespace().nth(1)?;
+    let url = url::Url::parse(&format!("http://127.0.0.1{path}")).ok()?;
     let q: HashMap<_, _> = url.query_pairs().into_owned().collect();
+    if !q.get("state").is_some_and(|s| same(s, expected_state)) {
+        return None;
+    }
     if let Some(err) = q.get("error") {
         let desc = q.get("error_description").cloned().unwrap_or_default();
-        return Err(format!("sign-in was declined: {err} {desc}")
+        return Some(Err(format!("sign-in was declined: {err} {desc}")
             .trim()
-            .to_string());
+            .to_string()));
     }
-    let code = q
-        .get("code")
-        .cloned()
-        .ok_or("no authorization code in callback")?;
-    let state = q.get("state").cloned().ok_or("no state in callback")?;
-    Ok((code, state))
+    Some(
+        q.get("code")
+            .cloned()
+            .ok_or_else(|| "no authorization code in callback".to_string()),
+    )
 }
 
 /// How long a browser sign-in may take before zMail gives up (the user can start again).
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// How long one loopback connection may take to send its request line.
+/// How long one loopback connection may take to send its request line, in all.
 const CALLBACK_READ_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The longest request line accepted: the redirect URL with its code and state fits easily.
+const MAX_REQUEST_LINE: usize = 16 * 1024;
 
 /// Bumped by `oauth_cancel_sign_in`; a waiting sign-in stops when it changes.
 static SIGN_IN_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -223,12 +232,14 @@ fn loopback_listeners() -> Result<(Vec<TcpListener>, u16), String> {
     Ok((out, port))
 }
 
-/// Wait for the browser to hit the loopback redirect; reply with a small page.
+/// Wait for the browser to hit the loopback redirect carrying `expected_state`; reply with a
+/// small page.
 fn wait_for_callback(
     listeners: Vec<TcpListener>,
     timeout: Duration,
     generation: u64,
-) -> Result<(String, String), String> {
+    expected_state: &str,
+) -> Result<String, String> {
     // Poll so an abandoned or cancelled sign-in ends instead of blocking forever.
     for l in &listeners {
         l.set_nonblocking(true).map_err(|e| e.to_string())?;
@@ -260,37 +271,71 @@ fn wait_for_callback(
             continue;
         };
         stream.set_nonblocking(false).map_err(|e| e.to_string())?;
-        stream
-            .set_read_timeout(Some(CALLBACK_READ_TIMEOUT))
-            .map_err(|e| e.to_string())?;
-        let mut line = String::new();
         // Browsers open spare connections they may never send on; drop one that stays quiet
-        // and keep waiting for the real redirect.
-        if BufReader::new(&stream).read_line(&mut line).is_err() {
+        // (or never ends its line) and keep waiting for the real redirect.
+        let Some(line) = read_request_line(&stream) else {
             continue;
-        }
+        };
         // Browsers also request /favicon.ico; ignore anything without a query.
         if !line.contains('?') {
             let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
             continue;
         }
-        let result = parse_callback(&line);
-        let body = match &result {
-            Ok(_) => {
-                "<h2 style='font-family:-apple-system'>You're signed in to zMail.</h2><p style='font-family:-apple-system'>You can close this tab.</p>"
-            }
-            Err(_) => {
-                "<h2 style='font-family:-apple-system'>Sign-in didn't complete.</h2><p style='font-family:-apple-system'>Return to zMail and try again.</p>"
-            }
+        // Not this sign-in's redirect (another program, or a tab from an earlier attempt):
+        // answer it and keep waiting.
+        let Some(result) = parse_callback(&line, expected_state) else {
+            respond(&mut stream, "400 Bad Request", NOT_SIGNED_IN_PAGE);
+            continue;
         };
-        let _ = write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
+        let page = match &result {
+            Ok(_) => SIGNED_IN_PAGE,
+            Err(_) => NOT_SIGNED_IN_PAGE,
+        };
+        respond(&mut stream, "200 OK", page);
         return result;
     }
+}
+
+const SIGNED_IN_PAGE: &str = "<h2 style='font-family:-apple-system'>You're signed in to zMail.</h2><p style='font-family:-apple-system'>You can close this tab.</p>";
+const NOT_SIGNED_IN_PAGE: &str = "<h2 style='font-family:-apple-system'>Sign-in didn't complete.</h2><p style='font-family:-apple-system'>Return to zMail and try again.</p>";
+
+fn respond(stream: &mut TcpStream, status: &str, page: &str) {
+    let _ = write!(
+        stream,
+        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}",
+        page.len()
+    );
+}
+
+/// The first line a loopback connection sends, or `None` if it isn't one within
+/// `CALLBACK_READ_TIMEOUT` and `MAX_REQUEST_LINE` bytes.
+fn read_request_line(mut stream: &TcpStream) -> Option<String> {
+    let deadline = Instant::now() + CALLBACK_READ_TIMEOUT;
+    let mut line = Vec::new();
+    let mut buf = [0u8; 2048];
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        stream.set_read_timeout(Some(left)).ok()?;
+        let n = stream.read(&mut buf).ok()?;
+        if n == 0 {
+            break; // closed: what came is all there is
+        }
+        line.extend_from_slice(&buf[..n]);
+        if let Some(end) = line.iter().position(|&b| b == b'\n') {
+            line.truncate(end + 1);
+            break;
+        }
+        if line.len() > MAX_REQUEST_LINE {
+            return None;
+        }
+    }
+    if line.len() > MAX_REQUEST_LINE {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&line).into_owned())
 }
 
 /// Stop a sign-in that is waiting for the browser.
@@ -370,14 +415,12 @@ pub async fn oauth_sign_in(
         .open_url(&auth_url, None::<&str>)
         .map_err(|e| e.to_string())?;
 
-    let (code, got_state) = tauri::async_runtime::spawn_blocking(move || {
-        wait_for_callback(listeners, SIGN_IN_TIMEOUT, generation)
+    // Only a redirect carrying this sign-in's state ends the wait.
+    let code = tauri::async_runtime::spawn_blocking(move || {
+        wait_for_callback(listeners, SIGN_IN_TIMEOUT, generation, &state)
     })
     .await
     .map_err(|e| e.to_string())??;
-    if got_state != state {
-        return Err("sign-in state mismatch; please try again".into());
-    }
 
     let tokens = token_request(
         &config,
@@ -534,27 +577,25 @@ mod tests {
         assert_ne!(a, random(64));
     }
 
-    fn callback_via(addr: SocketAddr) -> Result<(String, String), String> {
+    const REDIRECT: &[u8] = b"GET /?code=abc&state=xyz HTTP/1.1\r\nHost: localhost\r\n\r\n";
+
+    fn callback_via(addr: SocketAddr) -> Result<String, String> {
         let _turn = SIGN_IN_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
         let (listeners, port) = loopback_listeners().unwrap();
         let generation = SIGN_IN_GENERATION.load(Ordering::SeqCst);
         let target = SocketAddr::new(addr.ip(), port);
         let client = std::thread::spawn(move || {
             let mut s = TcpStream::connect(target).unwrap();
-            s.write_all(b"GET /?code=abc&state=xyz HTTP/1.1\r\nHost: localhost\r\n\r\n")
-                .unwrap();
+            s.write_all(REDIRECT).unwrap();
         });
-        let r = wait_for_callback(listeners, Duration::from_secs(5), generation);
+        let r = wait_for_callback(listeners, Duration::from_secs(5), generation, "xyz");
         client.join().unwrap();
         r
     }
 
     #[test]
     fn oauth_callback_reaches_ipv4_loopback() {
-        assert_eq!(
-            callback_via("127.0.0.1:0".parse().unwrap()).unwrap(),
-            ("abc".into(), "xyz".into())
-        );
+        assert_eq!(callback_via("127.0.0.1:0".parse().unwrap()).unwrap(), "abc");
     }
 
     #[test]
@@ -562,10 +603,119 @@ mod tests {
         if TcpListener::bind("[::1]:0").is_err() {
             return; // no IPv6 loopback on this machine
         }
-        assert_eq!(
-            callback_via("[::1]:0".parse().unwrap()).unwrap(),
-            ("abc".into(), "xyz".into())
+        assert_eq!(callback_via("[::1]:0".parse().unwrap()).unwrap(), "abc");
+    }
+
+    #[test]
+    fn oauth_callback_ignores_requests_without_this_sign_ins_state() {
+        let _turn = SIGN_IN_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let (listeners, port) = loopback_listeners().unwrap();
+        let generation = SIGN_IN_GENERATION.load(Ordering::SeqCst);
+        let client = std::thread::spawn(move || {
+            // Another program on the Mac gets to the port before the browser does.
+            for stray in [
+                &b"GET /?code=x&state=bogus HTTP/1.1\r\n\r\n"[..],
+                b"GET /?error=access_denied&error_description=fake HTTP/1.1\r\n\r\n",
+                b"GET /?error=access_denied&state=bogus HTTP/1.1\r\n\r\n",
+                b"OPTIONS /?code=x HTTP/1.1\r\n\r\n",
+            ] {
+                let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+                s.write_all(stray).unwrap();
+                // Wait for the reply so the requests arrive in order.
+                let _ = std::io::Read::read_to_end(&mut s, &mut Vec::new());
+            }
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.write_all(REDIRECT).unwrap();
+        });
+        let r = wait_for_callback(listeners, Duration::from_secs(10), generation, "xyz");
+        client.join().unwrap();
+        assert_eq!(r, Ok("abc".into()));
+    }
+
+    #[test]
+    fn oauth_callback_honours_a_decline_with_this_sign_ins_state() {
+        let _turn = SIGN_IN_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let (listeners, port) = loopback_listeners().unwrap();
+        let generation = SIGN_IN_GENERATION.load(Ordering::SeqCst);
+        let client = std::thread::spawn(move || {
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.write_all(b"GET /?error=access_denied&state=xyz HTTP/1.1\r\n\r\n")
+                .unwrap();
+        });
+        let r = wait_for_callback(listeners, Duration::from_secs(10), generation, "xyz");
+        client.join().unwrap();
+        assert!(r.unwrap_err().contains("access_denied"));
+    }
+
+    /// Writes `chunk` to a new connection every `gap` until the listener cuts it off, `give_up`
+    /// passes or 32 MB have gone; whether it was cut off, and when.
+    fn stream_until_cut_off(
+        port: u16,
+        chunk: &[u8],
+        gap: Duration,
+        give_up: Duration,
+    ) -> (bool, Duration) {
+        let start = Instant::now();
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut sent = 0;
+        while start.elapsed() < give_up && sent < 32 << 20 {
+            if s.write_all(chunk).is_err() {
+                return (true, start.elapsed());
+            }
+            sent += chunk.len();
+            std::thread::sleep(gap);
+        }
+        (false, start.elapsed())
+    }
+
+    #[test]
+    fn oauth_callback_cuts_off_an_endless_request_line() {
+        let _turn = SIGN_IN_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let (listeners, port) = loopback_listeners().unwrap();
+        let generation = SIGN_IN_GENERATION.load(Ordering::SeqCst);
+        let client = std::thread::spawn(move || {
+            // Megabytes with no newline, as fast as loopback takes them.
+            let cut = stream_until_cut_off(
+                port,
+                &[b'a'; 64 * 1024],
+                Duration::ZERO,
+                Duration::from_secs(4),
+            );
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.write_all(REDIRECT).unwrap();
+            cut
+        });
+        let r = wait_for_callback(listeners, Duration::from_secs(15), generation, "xyz");
+        let (cut_off, _) = client.join().unwrap();
+        assert!(cut_off, "the listener kept reading an endless request line");
+        assert_eq!(r, Ok("abc".into()));
+    }
+
+    #[test]
+    fn oauth_callback_cuts_off_a_request_line_that_trickles_in() {
+        let _turn = SIGN_IN_TESTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let (listeners, port) = loopback_listeners().unwrap();
+        let generation = SIGN_IN_GENERATION.load(Ordering::SeqCst);
+        let client = std::thread::spawn(move || {
+            // A byte at a time, each well inside the per-read timeout.
+            let cut = stream_until_cut_off(
+                port,
+                b"a",
+                Duration::from_millis(200),
+                Duration::from_secs(8),
+            );
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.write_all(REDIRECT).unwrap();
+            cut
+        });
+        let r = wait_for_callback(listeners, Duration::from_secs(20), generation, "xyz");
+        let (cut_off, after) = client.join().unwrap();
+        assert!(cut_off, "the listener waited on a trickling request line");
+        assert!(
+            after < CALLBACK_READ_TIMEOUT + Duration::from_secs(2),
+            "cut off after {after:?}"
         );
+        assert_eq!(r, Ok("abc".into()));
     }
 
     #[test]
@@ -574,7 +724,7 @@ mod tests {
         let (listeners, _) = loopback_listeners().unwrap();
         let generation = SIGN_IN_GENERATION.load(Ordering::SeqCst);
         let waiter = std::thread::spawn(move || {
-            wait_for_callback(listeners, Duration::from_secs(10), generation)
+            wait_for_callback(listeners, Duration::from_secs(10), generation, "xyz")
         });
         std::thread::sleep(Duration::from_millis(300));
         oauth_cancel_sign_in();
@@ -591,14 +741,13 @@ mod tests {
             let spare = TcpStream::connect(("127.0.0.1", port)).unwrap();
             std::thread::sleep(Duration::from_millis(100));
             let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-            s.write_all(b"GET /?code=abc&state=xyz HTTP/1.1\r\nHost: localhost\r\n\r\n")
-                .unwrap();
+            s.write_all(REDIRECT).unwrap();
             std::thread::sleep(CALLBACK_READ_TIMEOUT + Duration::from_secs(1));
             drop(spare);
         });
-        let r = wait_for_callback(listeners, Duration::from_secs(10), generation);
+        let r = wait_for_callback(listeners, Duration::from_secs(10), generation, "xyz");
         client.join().unwrap();
-        assert_eq!(r, Ok(("abc".into(), "xyz".into())));
+        assert_eq!(r, Ok("abc".into()));
     }
 
     #[test]
@@ -761,11 +910,30 @@ mod tests {
     #[test]
     fn parses_callback_success_and_error() {
         assert_eq!(
-            parse_callback("GET /?code=abc&state=xyz HTTP/1.1").unwrap(),
-            ("abc".to_string(), "xyz".to_string())
+            parse_callback("GET /?code=abc&state=xyz HTTP/1.1", "xyz"),
+            Some(Ok("abc".to_string()))
         );
-        let err = parse_callback("GET /?error=access_denied&error_description=nope HTTP/1.1")
-            .unwrap_err();
+        let err = parse_callback(
+            "GET /?error=access_denied&error_description=nope&state=xyz HTTP/1.1",
+            "xyz",
+        )
+        .unwrap()
+        .unwrap_err();
         assert!(err.contains("access_denied"));
+        assert_eq!(
+            parse_callback("GET /?state=xyz HTTP/1.1", "xyz"),
+            Some(Err("no authorization code in callback".to_string()))
+        );
+        // Without this sign-in's state it isn't the provider's redirect at all.
+        for line in [
+            "GET /?code=abc&state=xy HTTP/1.1",
+            "GET /?code=abc&state=xyzz HTTP/1.1",
+            "GET /?code=abc HTTP/1.1",
+            "GET /?error=access_denied HTTP/1.1",
+            "GET /?code=abc&state= HTTP/1.1",
+            "garbage",
+        ] {
+            assert_eq!(parse_callback(line, "xyz"), None, "{line}");
+        }
     }
 }
