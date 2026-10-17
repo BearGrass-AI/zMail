@@ -6,8 +6,7 @@ import { Check, Folder as FolderIcon, Paperclip, Star, X } from "lucide-react";
 import type { Email } from "@/lib/types";
 import { categoryOf, folderPath, sameDay, suggestionFor, useMail } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
-import { generativeProvider } from "@/lib/ai/providers";
-import { oneLiner } from "@/lib/ai/generative";
+import { cachedSummary, summarize } from "@/lib/ai/summaries";
 import { cn } from "@/lib/utils";
 import { EmailContextMenu, QuickActions, useEmailActions } from "../email-actions";
 import { CATEGORY_META } from "@/lib/meta";
@@ -18,21 +17,16 @@ import { Flag } from "lucide-react";
 import { RowCheck, useRowSelect } from "../selection";
 import { AccountDot } from "../account-switcher";
 
-const lineCache = new Map<string, string>();
-const inflight = new Map<string, Promise<string>>();
-
-/** Lazily fetch (and cache) the AI one-liner for an email. */
 export function useOneLiner(email: Email, enabled = true) {
-  const [line, setLine] = useState(lineCache.get(email.id));
+  const [line, setLine] = useState(() => cachedSummary(email.id));
   useEffect(() => {
-    if (!enabled || lineCache.has(email.id)) return;
+    if (!enabled || cachedSummary(email.id) !== undefined) return;
     let live = true;
-    const p = inflight.get(email.id) ?? oneLiner(generativeProvider(), email);
-    inflight.set(email.id, p);
-    p.then((l) => {
-      lineCache.set(email.id, l);
-      if (live) setLine(l);
-    }).catch(() => undefined);
+    // A failed summary isn't kept (see summaries.ts): the row shows the snippet and asks again next time.
+    summarize(email).then(
+      (l) => live && setLine(l),
+      () => undefined,
+    );
     return () => {
       live = false;
     };

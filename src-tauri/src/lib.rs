@@ -71,6 +71,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             http::http_request,
             display::reduce_transparency,
+            display::full_user_name,
             secrets::secret_get,
             secrets::secret_set,
             secrets::secret_delete,

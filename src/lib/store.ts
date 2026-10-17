@@ -16,6 +16,7 @@ import { cleanBodyHtml, textToBodyHtml } from "@/lib/mail/compose-html";
 import { restoreSignature, splitSavedSignature } from "@/lib/signature";
 import { cacheDeleteAccount, cacheGetMessage, cacheListFolders, cacheListMessages, cachePutMessages, kvGet, kvSet } from "@/lib/db";
 import { ME } from "@/lib/mail/mock-data";
+import { deriveMe, macUserName } from "@/lib/me";
 import { computeHabits, recordFiling } from "@/lib/ai/habits";
 import { triageAll } from "@/lib/ai/triage";
 import { pool } from "@/lib/google/gmail";
@@ -686,6 +687,7 @@ export const useMail = create<MailState>()((set, get) => {
       const habits = computeHabits(emails, folders);
       if (snap) restore(snap, habits);
       set({ folders, emails, habits: snap?.habits ? mergeHabits(new Map(snap.habits), habits) : habits });
+      void updateMe();
       // Scheduled sends live under their own key (saved on every change, not with the snapshot).
       const scheduled = await kvGet<ScheduledSend[]>(SCHEDULED_KEY).catch(() => null);
       // One left mid-edit at quit is no longer open in a composer: it sends as planned.
@@ -1634,6 +1636,22 @@ export const useMail = create<MailState>()((set, get) => {
       void findDates();
     },
   };
+});
+
+let macName: Promise<string> | null = null;
+
+/** Who you are (name and address), from your Mac user account and your accounts; see me.ts. */
+async function updateMe() {
+  macName ??= macUserName();
+  const name = await macName;
+  const s = useMail.getState();
+  const me = deriveMe(s.accounts, s.emails, name);
+  if (me.name !== s.me.name || me.address !== s.me.address) useMail.setState({ me });
+}
+
+// Connecting or removing an account can change which address is yours.
+useMail.subscribe((s, prev) => {
+  if (s.accounts !== prev.accounts) void updateMe();
 });
 
 // ---- sync helpers ------------------------------------------------------------------

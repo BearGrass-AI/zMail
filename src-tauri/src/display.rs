@@ -45,3 +45,16 @@ mod tests {
         assert_eq!(first, reduce_transparency());
     }
 }
+
+/// The full name of the Mac's user account ("Jane Appleseed"), which zMail greets you by.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub fn full_user_name() -> String {
+    objc2_foundation::NSFullUserName().to_string()
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub fn full_user_name() -> String {
+    String::new()
+}
