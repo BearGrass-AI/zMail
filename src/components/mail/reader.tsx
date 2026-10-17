@@ -37,6 +37,7 @@ import { SenderAvatar, readerDate, recipientNames } from "../meta";
 import { useEmailActions } from "../email-actions";
 import { EmailBody, useLightForced, useWouldRenderDark } from "./email-body";
 import { canRenderDark } from "@/lib/mail/dark-mode";
+import { isSingleMailbox } from "@/lib/mail/address";
 import { AttachmentStrip } from "./attachments";
 import { bucketOf, categoryOf } from "@/lib/store";
 
@@ -227,6 +228,8 @@ function QuickReply({ email }: { email: Email }) {
   const inFlight = useRef(false);
   const send = async () => {
     if (!text.trim() || inFlight.current) return;
+    // A malformed From parses to no address: there is no one to reply to.
+    if (!isSingleMailbox(email.from.address)) return toast.error("Couldn't send", { description: "This sender has no valid email address to reply to." });
     inFlight.current = true;
     setSending(true);
     const account = accounts.find((a) => a.id === email.accountId);

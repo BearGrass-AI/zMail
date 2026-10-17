@@ -23,7 +23,9 @@ export function replyRecipients(e: Email, mine: string[], all: boolean): { to: s
     });
   if (!all) {
     const to = keep([e.from]);
-    return { to: to.length ? to : keep(e.to), cc: [] };
+    // Only the user's own email falls back to its To; a sender with no usable address
+    // (a malformed From) gets an empty To rather than a reply to the other recipients.
+    return { to: to.length || !me.has(e.from.address.toLowerCase()) ? to : keep(e.to), cc: [] };
   }
   let to = keep([e.from, ...e.to]);
   if (!to.length) to = keep(e.to);

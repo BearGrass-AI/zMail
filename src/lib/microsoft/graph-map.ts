@@ -2,6 +2,7 @@
 
 import type { Attachment, CalEvent, CalendarInfo, Contact, Email, Folder, SystemFolder } from "@/lib/types";
 import { parseListUnsubscribe } from "@/lib/mail/unsubscribe";
+import { isSingleMailbox } from "@/lib/mail/address";
 
 // ---- API shapes (subset) ---------------------------------------------------------
 
@@ -107,10 +108,11 @@ export function foldersToTree(accountId: string, folders: GMailFolder[], systemI
   });
 }
 
-const contact = (r?: GRecipient): Contact => ({
-  name: r?.emailAddress.name || r?.emailAddress.address || "Unknown",
-  address: (r?.emailAddress.address ?? "").toLowerCase(),
-});
+/** An address that isn't exactly one mailbox (`a@x; b@y`) becomes "": kept whole, the composer would split it into several recipients. */
+const contact = (r?: GRecipient): Contact => {
+  const address = (r?.emailAddress.address ?? "").trim().toLowerCase();
+  return { name: r?.emailAddress.name || r?.emailAddress.address || "Unknown", address: isSingleMailbox(address) ? address : "" };
+};
 
 function htmlToText(html: string) {
   const doc = new DOMParser().parseFromString(html, "text/html");
