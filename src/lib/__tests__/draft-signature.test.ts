@@ -50,7 +50,7 @@ const { providers } = await import("@/lib/store/providers");
 const { Composer } = await import("@/components/mail/composer");
 const { GraphProvider } = await import("@/lib/microsoft/graph");
 const { HttpError } = await import("@/lib/transport");
-const { browserImageTools } = await import("@/lib/signature");
+const { browserImageTools, sanitizeSignature, withoutRemoteLoads } = await import("@/lib/signature");
 
 const LOGO = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const SIGNATURE = {
@@ -292,6 +292,73 @@ describe("a marked signature block from the server", () => {
     expect(c.signatureHtml).toBeUndefined();
     expect(c.prefill!.body).toContain("Alex");
     expect(c.prefill!.body).toContain("Earlier message");
+  });
+});
+
+// The browser decodes CSS escapes before it decides a function is url(), and image-set() loads
+// without url(), so the preview filter must not rely on spotting the literal text "url(".
+describe("CSS in a server signature that would load something remote", () => {
+  const BEACONS = [
+    "background:\\75rl(https://x.example/p.png)",
+    "background-image:u\\72l(https://x.example/p.png)",
+    "background-image: \\55 \\52 \\4c(https://x.example/p.png)",
+    'background-image:image-set("https://x.example/p.png" 1x)',
+    'BACKGROUND-IMAGE: -WEBKIT-IMAGE-SET( "https://x.example/p.png" 1X )',
+    "background-image: URL (https://x.example/p.png)",
+    "list-style: URL(  'https://x.example/p.png'  )",
+    'background-image: image("https://x.example/p.png")',
+    'background-image: src("https://x.example/p.png")',
+  ];
+
+  it.each(BEACONS)("keeps no remote reference: %s", (css) => {
+    const out = withoutRemoteLoads(sanitizeSignature(`<div style="color: red; ${css}; font-weight: bold">Alex</div>`));
+    expect(out).not.toMatch(/x\.example|\\|url|image|src\(/i);
+    expect(out).toContain("Alex");
+  });
+
+  it("keeps the harmless styles around it", () => {
+    const doc = new DOMParser().parseFromString(
+      withoutRemoteLoads(`<div style="color: rgb(192, 0, 0); background:\\75rl(https://x.example/p.png); font-family: Arial, sans-serif; font-size: 11pt">Alex</div>`),
+      "text/html",
+    );
+    const style = doc.querySelector("div")!.style;
+    expect(style.color).toBe("rgb(192, 0, 0)");
+    expect(style.fontFamily).toBe("Arial, sans-serif");
+    expect(style.fontSize).toBe("11pt");
+    expect(style.backgroundImage).toBe("");
+  });
+
+  it("leaves a plain signature's styles as they were", () => {
+    const html = `<table><tbody><tr><td style="color: rgb(192, 0, 0); font: 11pt Aptos, sans-serif;"><b>Alex Rivera</b></td></tr></tbody></table>`;
+    expect(withoutRemoteLoads(html)).toBe(html);
+  });
+
+  it("drops CSS that loads from SVG presentation attributes and style elements", () => {
+    const out = withoutRemoteLoads(
+      `<svg><style>rect{fill:url(https://x.example/a.svg#g)}</style><rect fill="u\\72l(https://x.example/a.svg#g)" filter="url(https://x.example/f.svg#f)" width="4" height="4"></rect></svg>` +
+        `<style>@import "https://x.example/s.css";</style><b>Alex</b>`,
+    );
+    expect(out).not.toMatch(/x\.example|<style/i);
+    expect(out).toContain('width="4"');
+    expect(out).toContain("<b>Alex</b>");
+  });
+
+  it("has no style elements left after sanitizing, in HTML or SVG", () => {
+    expect(sanitizeSignature(`<style>b{color:red}</style><svg><style>rect{fill:red}</style><rect></rect></svg><b>Alex</b>`)).not.toMatch(/<style/i);
+  });
+
+  it("isn't fetched by the composer preview of a reopened draft", async () => {
+    const { c } = await openStored(
+      gmail,
+      `<div>Body text</div><br><div class="zmail-signature"><div style="background:\\75rl(https://x.example/p.png); color: navy">Alex</div>` +
+        `<div style='background-image:image-set("https://x.example/q.png" 1x)'>Rivera</div></div>`,
+    );
+    // Kept for sending as the user saved it; only the preview is filtered.
+    expect(c.signatureHtml).toContain("x.example");
+    const shown = preview()!;
+    expect(shown.innerHTML).not.toMatch(/x\.example|\\75rl|image-set/i);
+    expect(shown.textContent).toContain("Alex");
+    expect(shown.querySelector("div")!.style.color).toBe("navy");
   });
 });
 

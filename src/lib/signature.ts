@@ -173,9 +173,23 @@ export function restoreSignature(html: string, images: Pick<InlineImage, "cid" |
   return doc.body.innerHTML.trim();
 }
 
-/** For showing signature HTML that came from a server: nothing in it loads from the network. */
+/**
+ * CSS text that could fetch something, judged on the raw text rather than on what a parser
+ * makes of it: the browser decodes escapes (\75rl( is url() before it recognises a function,
+ * and image-set() and friends load without url(). So any backslash, and any of these names
+ * in any case or spacing, counts. Parsing through CSSOM instead would depend on the engine
+ * (jsdom's doesn't decode escapes like WebKit does), so a test could pass while WebKit loads.
+ */
+const REMOTE_CSS = /\\|url|image-set|image\s*\(|@import|src\s*\(/i;
+
+/**
+ * For showing signature HTML that came from a server: nothing in it loads from the network.
+ * Declarations that might load are dropped one by one, so the colours and fonts around them
+ * stay. What's left can't spell a loading function across a ";" since none of them contain one.
+ */
 export function withoutRemoteLoads(html: string): string {
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+  for (const el of doc.body.querySelectorAll("style")) el.remove();
   for (const el of doc.body.querySelectorAll("*")) {
     for (const name of ["src", "background", "poster", "href", "xlink:href"]) {
       if (name === "href" && el.localName === "a") continue;
@@ -183,7 +197,14 @@ export function withoutRemoteLoads(html: string): string {
       if (v !== null && !/^\s*(data:|#)/i.test(v)) el.removeAttribute(name);
     }
     const style = el.getAttribute("style");
-    if (style && /url\s*\(/i.test(style)) el.setAttribute("style", style.replace(/url\s*\([^)]*\)/gi, "none"));
+    if (style && REMOTE_CSS.test(style)) {
+      const kept = style.split(";").filter((d) => !REMOTE_CSS.test(d));
+      if (kept.some((d) => d.trim())) el.setAttribute("style", kept.join(";"));
+      else el.removeAttribute("style");
+    }
+    // SVG presentation attributes (fill, filter, mask...) are CSS values too.
+    if (el.namespaceURI !== doc.documentElement.namespaceURI)
+      for (const { name, value } of [...el.attributes]) if (REMOTE_CSS.test(value)) el.removeAttribute(name);
   }
   return doc.body.innerHTML;
 }
