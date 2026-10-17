@@ -4,6 +4,19 @@
 
 <h1 align="center">zMail</h1>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/macOS-13.3%2B-4A86F2?style=flat-square&labelColor=0D1117" alt="macOS 13.3+" />
+  <img src="https://img.shields.io/badge/Apple-silicon-4A86F2?style=flat-square&labelColor=0D1117" alt="Apple silicon" />
+  <img src="https://img.shields.io/badge/Tauri-2-4A86F2?style=flat-square&labelColor=0D1117" alt="Tauri 2" />
+  <img src="https://img.shields.io/badge/license-MIT-4A86F2?style=flat-square&labelColor=0D1117" alt="MIT license" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/umzcio/zMail/releases/latest">
+    <img src="https://img.shields.io/github/v/release/umzcio/zMail?style=for-the-badge&label=Download&color=4A86F2&labelColor=0D1117" alt="Download the latest release" />
+  </a>
+</p>
+
 I get a lot of email, and most of it doesn't need me. zMail is the Mac mail client I wanted for that: it sorts the inbox into what actually needs me, what's worth a skim, and what can go, and it lets me hand the busywork to an assistant.
 
 It works with Outlook / Microsoft 365 and Gmail, and it's built with Tauri 2 (Rust), React 19, Tailwind and Zustand. macOS only. It's a personal project, so expect rough edges.
@@ -171,3 +184,7 @@ It builds the app, signs it with my Developer ID (`Developer ID Application: Zac
 Everything ends up in `release/`: the DMG, the update bundle (`.app.tar.gz` and its `.sig`) and `latest.json`. Nothing is published unless you add `--publish`, which creates the GitHub release `v<version>` at the current commit and uploads all four files (it needs `gh`, signed in, and the commit pushed). Without it, the script prints the `gh release create` command so you can look things over first.
 
 The updater's private key and its password live in the macOS Keychain (service `com.zach.zmail.updater`, accounts `private-key` and `password`), and the script reads them only for the build. Back them up somewhere safe: without that key, copies already out there can't be updated, and a new key means everyone has to download the next version by hand.
+
+## Contributing and license
+
+Bug reports and fixes are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). zMail is released under the [MIT License](LICENSE).
