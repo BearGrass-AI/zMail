@@ -255,7 +255,8 @@ export interface MailState {
   /** Take emails out of Needs you without moving them (Done also marks them read). Teaches nothing. */
   resolve: (ids: string[], why: Resolution["why"]) => void;
   unresolve: (ids: string[]) => void;
-  setCategory: (ids: string[], category: Category) => void;
+  /** Your correction: it also teaches the sorting model, unless learn is false (display only). */
+  setCategory: (ids: string[], category: Category, opts?: { learn?: boolean }) => void;
   addRule: (sender: string, folderId: string) => void;
   removeRule: (sender: string) => void;
   addAutoRule: (input: { from: string; subjectAny?: string[]; action: RuleAction }) => AutoRule;

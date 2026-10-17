@@ -8,7 +8,7 @@ import type { NewEvent } from "@/lib/calendar/provider";
 import type { MailSection } from "@/lib/sections";
 import type { Compose, ComposeOpened, ComposeView } from "@/lib/store";
 import type { ToolCall, ToolDef } from "@/lib/ai/tool-chat";
-import { needsConfirm, opText, type BulkOp, type BulkOptions, type BulkResult, type UndoEntry } from "@/lib/mail/bulk";
+import { DIRECT_LIMIT, needsConfirm, opText, type BulkOp, type BulkOptions, type BulkResult, type UndoEntry } from "@/lib/mail/bulk";
 import { cleanQuery, describeQuery, type MailQuery } from "./query";
 import { KIND_LABELS, type Kind } from "./kinds";
 import { SET_CAP, useAssistant, type Card, type Ref } from "./state";
@@ -23,6 +23,8 @@ import { FolderPending, resolveFolder } from "./folders";
 export { SET_CAP };
 const SAMPLE = 20;
 const READ_CAP = 6000;
+const EVENT_LOCATION_MAX = 300;
+const EVENT_NOTES_MAX = 2000;
 
 export interface ViewInfo {
   open?: Email;
@@ -139,8 +141,7 @@ export const CORE_TOOLS: ToolDef[] = [
   },
   {
     name: "act",
-    description:
-      "Change emails: a set_id, or ids from earlier tool results. Archive, read/unread, star/unstar, move_to_section and set_lane happen right away (with Undo) while they total 25 emails or fewer in this user message. Trash, spam, move_to_folder, and anything past that show the user a confirm card. Nothing has happened until a tool result says so.",
+    description: `Change emails: a set_id, or ids from earlier tool results. Archive, read/unread, star/unstar, move_to_section and set_lane happen right away (with Undo) while they total ${DIRECT_LIMIT} emails or fewer in this user message. Trash, spam, move_to_folder, and anything past that show the user a confirm card. Nothing has happened until a tool result says so.`,
     parameters: {
       type: "object",
       properties: {
@@ -437,7 +438,7 @@ async function run(name: string, a: Record<string, unknown>, deps: ToolDeps): Pr
       const detail = set?.label ?? "Emails you pointed at";
       // A set searched by one sender (address or domain) lets the card offer a rule and Unsubscribe once it's done.
       const sender = set?.query?.from ? normalizeFrom(set.query.from) : null;
-      // The 25-email budget covers the whole user message, so many small acts can't add up to a big unconfirmed change.
+      // The DIRECT_LIMIT budget covers the whole user message, so many small acts can't add up to a big unconfirmed change.
       if (!needsConfirm(op, refs.length) && takeDirect(refs.length)) {
         const emails = await deps.loadHeaders(refs);
         useAssistant.getState().expireUndo();
@@ -489,9 +490,14 @@ async function run(name: string, a: Record<string, unknown>, deps: ToolDeps): Pr
       if (allDay && a.end && !Number.isNaN(end.getTime()) && end.getTime() === start.getTime()) end = nextDay(start);
       if (Number.isNaN(end.getTime()) || end <= start) throw new Error("bad_query: end must be after start");
       const emailId = a.email_id ? String(a.email_id) : undefined;
+      // The card shows all of these, so they're bounded to what a card can show.
+      const location = a.location ? String(a.location).trim() || undefined : undefined;
+      const notes = a.notes ? String(a.notes).trim() || undefined : undefined;
+      if (location && location.length > EVENT_LOCATION_MAX) throw new Error(`bad_query: location must be ${EVENT_LOCATION_MAX} characters or fewer`);
+      if (notes && notes.length > EVENT_NOTES_MAX) throw new Error(`bad_query: notes must be ${EVENT_NOTES_MAX.toLocaleString("en-US")} characters or fewer`);
       st.push({
         kind: "card",
-        card: { type: "event", event: { title, start: localMinute(start), end: localMinute(end), allDay, location: a.location ? String(a.location) : undefined, notes: a.notes ? String(a.notes) : undefined, emailId }, status: "pending" },
+        card: { type: "event", event: { title, start: localMinute(start), end: localMinute(end), allDay, location, notes, emailId }, status: "pending" },
       });
       return { status: "awaiting_confirmation", message: "An event card is showing for the user to add. It isn't on the calendar yet." };
     }

@@ -47,10 +47,14 @@ export interface BulkOptions {
   isCancelled?: () => boolean;
 }
 
-export const DIRECT_LIMIT = 25;
+/**
+ * Most emails the assistant changes without a confirm card in one user message. Kept small because
+ * text in an email the assistant read can steer which tool it calls; past this the user confirms.
+ */
+export const DIRECT_LIMIT = 3;
 const UNDOABLE: BulkOp["kind"][] = ["archive", "read", "star", "section", "lane"];
 
-/** Undoable ops on up to 25 emails run directly; everything else shows a confirm card. */
+/** Undoable ops on up to DIRECT_LIMIT emails run directly; everything else shows a confirm card. */
 export function needsConfirm(op: BulkOp, count: number) {
   return !UNDOABLE.includes(op.kind) || count > DIRECT_LIMIT;
 }

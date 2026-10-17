@@ -314,22 +314,22 @@ describe("final fixes: approval budget and prompt", () => {
     const calls: number[] = [];
     const d = { ...deps, bulk: async (emails: Email[]) => (calls.push(emails.length), { done: emails.length, skipped: 0, failed: [], undo: [] }) } as unknown as ToolDeps;
     useAssistant.getState().remember(all.map((e) => ({ id: e.id, accountId: e.accountId })));
-    const ids = (from: number) => all.slice(from, from + 20).map((e) => e.id);
+    const ids = (from: number) => all.slice(from, from + 2).map((e) => e.id);
     const p = scripted([
       tool("act", { ids: ids(0), op: "archive" }, "a1"),
-      tool("act", { ids: ids(16), op: "archive" }, "a2"),
-      { text: "First 20 archived; confirm the card for the rest.", toolCalls: [] },
+      tool("act", { ids: ids(1), op: "archive" }, "a2"),
+      { text: "First 2 archived; confirm the card for the rest.", toolCalls: [] },
       tool("act", { ids: ids(0), op: "mark_read" }, "a3"),
       { text: "Marked read.", toolCalls: [] },
     ]);
     await ask("archive these, then those", d, p);
-    expect(calls).toEqual([20]);
+    expect(calls).toEqual([2]);
     const statuses = () => useAssistant.getState().items.flatMap((i) => (i.kind === "card" && i.card.type === "bulk" ? [i.card.status] : []));
     expect(statuses()).toEqual(["done", "pending"]);
     const second = useAssistant.getState().history.find((m) => m.role === "tool" && m.toolCallId === "a2") as { content: string };
     expect(JSON.parse(second.content).status).toBe("awaiting_confirmation");
     await ask("mark them read", d, p);
-    expect(calls).toEqual([20, 20]);
+    expect(calls).toEqual([2, 2]);
     expect(statuses()).toEqual(["done", "pending", "done"]);
   });
 
@@ -338,11 +338,11 @@ describe("final fixes: approval budget and prompt", () => {
     const d = { ...deps, bulk: async (emails: Email[]) => (calls.push(emails.length), { done: emails.length, skipped: 0, failed: [], undo: [] }) } as unknown as ToolDeps;
     useAssistant.getState().remember(all.map((e) => ({ id: e.id, accountId: e.accountId })));
     let n = 0;
-    const flaky: GenerativeProvider = { name: "f", complete: async () => "", chat: async () => (n++ === 0 ? tool("act", { ids: all.slice(0, 20).map((e) => e.id), op: "archive" }) : Promise.reject(new Error("boom"))) };
+    const flaky: GenerativeProvider = { name: "f", complete: async () => "", chat: async () => (n++ === 0 ? tool("act", { ids: all.slice(0, 2).map((e) => e.id), op: "archive" }) : Promise.reject(new Error("boom"))) };
     await ask("archive", d, flaky);
-    expect(useAssistant.getState().directThisTurn).toBe(20);
-    await retry(useAssistant.getState().items.find((i) => i.kind === "user")!.id, d, scripted([tool("act", { ids: all.slice(20, 30).map((e) => e.id), op: "archive" }), { text: "ok", toolCalls: [] }]));
-    expect(calls).toEqual([20]);
+    expect(useAssistant.getState().directThisTurn).toBe(2);
+    await retry(useAssistant.getState().items.find((i) => i.kind === "user")!.id, d, scripted([tool("act", { ids: all.slice(2, 4).map((e) => e.id), op: "archive" }), { text: "ok", toolCalls: [] }]));
+    expect(calls).toEqual([2]);
   });
 
   it("tells the model the inbox counts and to scope 'my emails' to the inbox", async () => {

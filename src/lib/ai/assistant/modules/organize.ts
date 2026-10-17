@@ -43,7 +43,10 @@ export interface OrganizeDeps {
   addRule(sender: string, folderId: string): void;
   removeRule(sender: string): void;
   snapshotCategories(ids: string[]): CategorySnapshot;
-  setCategory(ids: string[], category: Category): void;
+  /** teach: also record lessons, which the sorting model reads as the user's own corrections. */
+  setCategory(ids: string[], category: Category, teach: boolean): void;
+  /** The sender addresses of these emails, deduped. */
+  sendersOf(ids: string[]): string[];
   restoreCategories(ids: string[], snap: CategorySnapshot): void;
   addSection(input: Omit<MailSection, "id">): string;
   updateSection(id: string, patch: Partial<Omit<MailSection, "id">>): void;
@@ -85,7 +88,13 @@ function realOrganizeDeps(): OrganizeDeps {
         lessons: st.lessons.filter((l) => want.has(l.emailId) && isCat(l)),
       };
     },
-    setCategory: (ids, category) => s().setCategory(ids, category),
+    setCategory: (ids, category, teach) => s().setCategory(ids, category, { learn: teach }),
+    sendersOf: (ids) => {
+      const mine = new Map(s().emails.map((e) => [e.id, e]));
+      const seen = useAssistant.getState().headers;
+      const out = ids.map((id) => (mine.get(id) ?? (Object.hasOwn(seen, id) ? seen[id] : undefined))?.from.address.toLowerCase());
+      return [...new Set(out.filter((a): a is string => !!a))];
+    },
     restoreCategories: (ids, snap) => {
       const want = new Set(ids);
       useMail.setState((st) => {
@@ -131,6 +140,11 @@ const AWAIT = { status: "awaiting_confirmation", note: "A card is waiting for th
 const step = (text: string) => useAssistant.getState().push({ kind: "step", text });
 
 const FOLDER_NAME_MAX = 100;
+/** A section's name and description are the criteria the sorting model reads for every email. */
+const SECTION_NAME_MAX = 100;
+const SECTION_DESCRIPTION_MAX = 500;
+/** Senders named on a card; the rest are counted. */
+const SENDERS_SHOWN = 5;
 
 /** The account create_folder works in: the one named, else the open folder's, else the only one. */
 function folderAccount(o: OrganizeDeps, v: unknown): { id: string; address: string } {
@@ -159,6 +173,21 @@ function requireSection(deps: OrganizeDeps, id: unknown): MailSection {
   return sec;
 }
 
+/** A section name or description from the model: non-empty and bounded. */
+function sectionText(v: unknown, what: "name" | "description"): string {
+  const t = str(v);
+  if (!t) throw new Error(`bad_query: ${what} can't be empty`);
+  const max = what === "name" ? SECTION_NAME_MAX : SECTION_DESCRIPTION_MAX;
+  if (t.length > max) throw new Error(`bad_query: ${what} must be ${max} characters or fewer`);
+  return t;
+}
+
+/** "a@x.com, b@y.com and 3 more". */
+function senderList(senders: string[]): string {
+  const shown = senders.slice(0, SENDERS_SHOWN).join(", ");
+  return senders.length > SENDERS_SHOWN ? `${shown} and ${(senders.length - SENDERS_SHOWN).toLocaleString()} more` : shown;
+}
+
 function resortStale(deps: OrganizeDeps) {
   void deps.sort({ staleSections: true }).catch(() => {});
 }
@@ -171,7 +200,7 @@ export const organizeModule: ToolModule = {
   id: ID,
   prompt: [
     "- Categories (primary, transactions, updates, promotions, social, newsletters, security) are what kind of email it is; lanes are what to do with it; sections are the user's own groups.",
-    "- Rule deletions, always-file rules, new sections, deleting sections, whole-inbox re-sorts and accepting folder suggestions show a card; tell the user to confirm there.",
+    "- Turning rules on or off, rule deletions, always-file rules, new sections, section edits, deleting sections, whole-inbox re-sorts and accepting folder suggestions show a card; tell the user to confirm there.",
     "- To always file a sender's mail into a folder, use always_file. For other automatic handling of new mail (trash, archive, mark read, a lane), use propose_rule.",
     "- Folders must exist before you file, move or add rules into them. To make new ones, call create_folder (one per folder) and wait for the user's confirmation before moving mail or adding rules into them.",
     "- When proposing a new folder structure, list the folders you'd create and ask before calling create_folder.",
@@ -180,7 +209,7 @@ export const organizeModule: ToolModule = {
     { name: "list_rules", description: "List the user's automatic rules (id, text, enabled, hits) and always-file rules (sender, folder).", parameters: none },
     {
       name: "set_rule_enabled",
-      description: "Turn an automatic rule on or off right away (the user gets an Undo toast).",
+      description: "Turn an automatic rule on or off. Shows a confirm card naming the rule.",
       parameters: { type: "object", properties: { id: { type: "string" }, enabled: { type: "boolean" } }, required: ["id", "enabled"] },
     },
     {
@@ -211,10 +240,15 @@ export const organizeModule: ToolModule = {
     },
     {
       name: "set_category",
-      description: `Set the category of emails (ids from earlier tool results, or a set_id). Changes happen right away with Undo while they total ${DIRECT_LIMIT} emails or fewer in this user message; more shows a confirm card. This also teaches the sorting model.`,
+      description: `Set the category of emails (ids from earlier tool results, or a set_id). Changes how they show, right away with Undo while they total ${DIRECT_LIMIT} emails or fewer in this user message; more shows a confirm card. Only with teach: true does the sorting model learn from it for future mail from these senders, and then the user always confirms on a card.`,
       parameters: {
         type: "object",
-        properties: { ids: { type: "array", items: { type: "string" } }, set_id: { type: "string" }, category: { type: "string", enum: [...CATEGORIES] } },
+        properties: {
+          ids: { type: "array", items: { type: "string" } },
+          set_id: { type: "string" },
+          category: { type: "string", enum: [...CATEGORIES] },
+          teach: { type: "boolean", description: "Only when the user asked zMail to learn this for the future" },
+        },
         required: ["category"],
       },
     },
@@ -235,7 +269,7 @@ export const organizeModule: ToolModule = {
     },
     {
       name: "update_section",
-      description: "Rename a section or change its description right away. Mail sorted before the change is re-sorted in the background.",
+      description: "Rename a section or change its description. Shows a confirm card with the new text; once confirmed, mail sorted before the change is re-sorted in the background.",
       parameters: { type: "object", properties: { id: { type: "string" }, name: { type: "string" }, description: { type: "string" } }, required: ["id"] },
     },
     { name: "delete_section", description: "Delete a section. Shows a confirm card.", parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
@@ -273,11 +307,19 @@ export const organizeModule: ToolModule = {
       const rule = o.autoRules().find((r) => r.id === a.id);
       if (!rule) throw new Error(`unknown rule id "${String(a.id)}": use an id from list_rules`);
       if (typeof a.enabled !== "boolean") throw new Error("bad_query: enabled must be true or false");
-      const was = rule.enabled;
-      o.setAutoRuleEnabled(rule.id, a.enabled);
-      step(`${a.enabled ? "Turned on" : "Turned off"} a rule`);
-      deps.toast(`Rule turned ${a.enabled ? "on" : "off"}`, () => o.setAutoRuleEnabled(rule.id, was));
-      return { id: rule.id, enabled: a.enabled };
+      if (rule.enabled === a.enabled) return { id: rule.id, enabled: a.enabled, note: `That rule is already ${a.enabled ? "on" : "off"}.` };
+      const folders = o.folders();
+      const text = describeRule(rule, (id) => folderPath(folders, id) || undefined);
+      pushConfirmCard({
+        module: ID,
+        action: "set_rule_enabled",
+        title: a.enabled ? "Turn on rule" : "Turn off rule",
+        detail: text,
+        preview: { fields: [{ label: "Rule", value: text }] },
+        payload: { id: rule.id, enabled: a.enabled },
+        confirmLabel: a.enabled ? "Turn on" : "Turn off",
+      });
+      return AWAIT;
     },
 
     async delete_rule(a, deps) {
@@ -367,20 +409,24 @@ export const organizeModule: ToolModule = {
       const category = a.category as Category;
       if (!CATEGORIES.includes(category)) throw new Error(`bad_query: category must be one of ${CATEGORIES.join(", ")}`);
       const ids = targetIds(a);
-      if (takeDirect(ids.length)) {
+      // Teaching is a lasting change to how future mail is sorted, so only a click on a card does it.
+      const teach = a.teach === true;
+      if (!teach && takeDirect(ids.length)) {
         const snap = o.snapshotCategories(ids);
-        o.setCategory(ids, category);
+        o.setCategory(ids, category, false);
         step(`Set ${plural(ids.length, "email")} to ${category}`);
         deps.toast(`Set ${plural(ids.length, "email")} to ${category}`, () => o.restoreCategories(ids, snap));
-        return { done: ids.length, category };
+        return { done: ids.length, category, taught: false, note: "Only how these emails show changed; the sorting model didn't learn from it." };
       }
+      const senders = o.sendersOf(ids);
       pushConfirmCard({
         module: ID,
         action: "set_category",
         title: `Set ${plural(ids.length, "email")} to ${category}`,
-        detail: "This also teaches the sorting model.",
-        payload: { ids, category },
-        confirmLabel: "Set category",
+        detail: teach ? "zMail's sorting model will learn this for future mail from these senders." : "Only these emails change; the sorting model doesn't learn from it.",
+        preview: { fields: [...(senders.length ? [{ label: "From", value: senderList(senders) }] : []), { label: "Category", value: category }] },
+        payload: { ids, category, teach },
+        confirmLabel: teach ? "Set and teach" : "Set category",
       });
       return AWAIT;
     },
@@ -395,9 +441,9 @@ export const organizeModule: ToolModule = {
 
     async create_section(a, deps) {
       const o = d(deps);
-      const name = str(a.name);
-      const description = str(a.description);
-      if (!name || !description) throw new Error("bad_query: name and description are required");
+      if (!str(a.name) || !str(a.description)) throw new Error("bad_query: name and description are required");
+      const name = sectionText(a.name, "name");
+      const description = sectionText(a.description, "description");
       if (o.sections().some((x) => x.name.toLowerCase() === name.toLowerCase())) throw new Error(`bad_query: a section named "${name}" already exists`);
       const folder = a.folder !== undefined && str(a.folder) ? resolveFolder(o.folders(), a.folder, { userOnly: true }) : undefined;
       const dates = a.catch_dates === true;
@@ -423,20 +469,26 @@ export const organizeModule: ToolModule = {
     async update_section(a, deps) {
       const o = d(deps);
       const sec = requireSection(o, a.id);
-      const patch: Partial<Omit<MailSection, "id">> = {};
-      if (a.name !== undefined) {
-        if (!str(a.name)) throw new Error("bad_query: name can't be empty");
-        patch.name = str(a.name);
-      }
-      if (a.description !== undefined) {
-        if (!str(a.description)) throw new Error("bad_query: description can't be empty");
-        patch.description = str(a.description);
-      }
+      const patch: { name?: string; description?: string } = {};
+      if (a.name !== undefined) patch.name = sectionText(a.name, "name");
+      if (a.description !== undefined) patch.description = sectionText(a.description, "description");
       if (!Object.keys(patch).length) throw new Error("bad_query: give a name or description to change");
-      o.updateSection(sec.id, patch);
-      resortStale(o);
-      step(`Updated the “${patch.name ?? sec.name}” section`);
-      return { id: sec.id, updated: Object.keys(patch), note: "Mail sorted before this change is being re-sorted in the background." };
+      // The description is what the sorting model reads, so the card shows the whole new text.
+      pushConfirmCard({
+        module: ID,
+        action: "update_section",
+        title: `Change section “${sec.name}”`,
+        detail: "Mail is re-sorted with the new wording once you confirm.",
+        preview: {
+          fields: [
+            ...(patch.name !== undefined ? [{ label: "Name", value: patch.name }] : []),
+            ...(patch.description !== undefined ? [{ label: "Description", value: patch.description }] : []),
+          ],
+        },
+        payload: { id: sec.id, patch },
+        confirmLabel: "Save section",
+      });
+      return AWAIT;
     },
 
     async delete_section(a, deps) {
@@ -542,6 +594,13 @@ export const organizeModule: ToolModule = {
     },
   },
   confirm: {
+    async set_rule_enabled(payload, deps) {
+      const o = d(deps);
+      const p = payload as { id: string; enabled: boolean };
+      if (!o.autoRules().some((r) => r.id === p.id)) throw new Error("That rule is gone.");
+      o.setAutoRuleEnabled(p.id, p.enabled);
+      return `Rule turned ${p.enabled ? "on" : "off"}`;
+    },
     async delete_rule(payload, deps) {
       const o = d(deps);
       const p = payload as { id?: string; sender?: string };
@@ -564,9 +623,20 @@ export const organizeModule: ToolModule = {
       return `Created "${p.path}"`;
     },
     async set_category(payload, deps) {
-      const p = payload as { ids: string[]; category: Category };
-      d(deps).setCategory(p.ids, p.category);
-      return `Set ${plural(p.ids.length, "email")} to ${p.category}`;
+      const p = payload as { ids: string[]; category: Category; teach?: boolean };
+      // Cards saved before teach existed said "This also teaches the sorting model".
+      const teach = p.teach ?? true;
+      d(deps).setCategory(p.ids, p.category, teach);
+      return `Set ${plural(p.ids.length, "email")} to ${p.category}${teach ? "; the sorting model learned from it" : ""}`;
+    },
+    async update_section(payload, deps) {
+      const o = d(deps);
+      const p = payload as { id: string; patch: { name?: string; description?: string } };
+      const sec = o.sections().find((x) => x.id === p.id);
+      if (!sec) throw new Error("That section is gone.");
+      o.updateSection(sec.id, p.patch);
+      resortStale(o);
+      return `Updated “${p.patch.name ?? sec.name}”; mail sorted before the change is being re-sorted`;
     },
     async create_section(payload, deps) {
       const o = d(deps);

@@ -2,7 +2,7 @@
 // What the buttons on assistant cards do. Outcomes are queued as notes so the
 // model hears about them with the user's next message.
 
-import { SET_CAP, useAssistant, type Card, type Item, type Ref, type ResultSet } from "./state";
+import { SET_CAP, useAssistant, type Card, type EventDraft, type Item, type Ref, type ResultSet } from "./state";
 import { findUnsubscribe, pushRuleCard, type ToolDeps } from "./tools";
 import { realDeps } from "./deps";
 import { useMail } from "@/lib/store";
@@ -148,6 +148,25 @@ export function undoFromToast(itemId: string, deps: ToolDeps = realDeps()) {
       if (!ok) deps.toast("Couldn't undo");
     })
     .catch(() => deps.toast("Couldn't undo"));
+}
+
+/**
+ * The event card's detail line: when it ends, where, and the notes. With the title and start,
+ * that is everything Add writes to the calendar.
+ */
+export function eventDetail(e: EventDraft): string {
+  const start = new Date(e.start);
+  const end = new Date(e.end);
+  const day = (d: Date) => d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+  const time = (d: Date) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  let ends: string | undefined;
+  if (e.allDay) {
+    // All-day ends are exclusive: the event's last day is the one before.
+    const last = new Date(end);
+    last.setDate(last.getDate() - 1);
+    if (day(last) !== day(start)) ends = `Through ${day(last)}`;
+  } else ends = day(end) === day(start) ? `Until ${time(end)}` : `Until ${day(end)}, ${time(end)}`;
+  return [ends, e.location, e.notes].filter(Boolean).join(" · ");
 }
 
 export async function addEvent(itemId: string, calendarId: string, deps: ToolDeps = realDeps()) {
