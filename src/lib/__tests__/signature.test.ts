@@ -245,6 +245,17 @@ describe("sizeSignatureImages", () => {
     expect(second.getAttribute("width")).toBe("200");
   });
 
+  // A reopened draft's signature came from the server: nothing in it is fetched to measure it.
+  it("measures only embedded images when remote loads are off", async () => {
+    const seen: string[] = [];
+    const tools: ImageTools = { naturalSize: async (src) => (seen.push(src), { width: 400, height: 100 }), rasterize: async () => null };
+    const html = composeHtml("Hi", `<p><img src="https://tracker.example/p.png"><img src="${png}"></p>`);
+    const [remote, local] = parse(await sizeSignatureImages(html, tools, { remote: false })).querySelectorAll("img");
+    expect(seen).toEqual([png]);
+    expect(remote.hasAttribute("width")).toBe(false);
+    expect(local.getAttribute("width")).toBe("200");
+  });
+
   it("returns mail without a signature unchanged", async () => {
     const html = composeHtml("a & b\nc");
     expect(await sizeSignatureImages(html, fake().tools)).toBe(html);
@@ -381,5 +392,14 @@ describe("splitSavedSignature", () => {
     expect(split.signature).toBe("");
     expect(split.quote).toContain("From: Ann");
     expect(split.quote).toContain("Ann, Registrar");
+  });
+
+  // A draft started in Outlook or Gmail has no block of ours, so one under its quote header is the quoted sender's.
+  it.each([
+    ["Outlook", `<div>My reply</div><div id="appendonsend"></div><hr><div id="divRplyFwdMsg">From: Ann</div><div class="zmail-signature"><a href="https://phish.example/login">Ann</a></div>`],
+    ["Outlook (nested)", `<div>My reply</div><hr><div id="divRplyFwdMsg">From: Ann</div><div><div class="zmail-signature"><img src="https://tracker.example/p.png"></div></div>`],
+    ["Gmail", `<div>My reply</div><div class="gmail_quote"><div>---------- Forwarded message ---------</div><div class="zmail-signature">Ann</div></div>`],
+  ])("ignores a signature block under a %s quote", (_name, html) => {
+    expect(splitSavedSignature(`<html><body>${html}</body></html>`)).toBeNull();
   });
 });

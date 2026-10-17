@@ -121,4 +121,14 @@ describe("links in emails", () => {
       expect(a.getAttribute("rel")).toBe("noopener noreferrer");
     }
   });
+
+  it("so does every image-map area", () => {
+    const { html } = prepareHtml('<img usemap="#m" src="data:image/png;base64,AAAA"><map name="m"><area href="/" shape="rect" coords="0,0,10,10"><area href="https://info.example.org/a" target="_self"></map>', true);
+    const areas = new DOMParser().parseFromString(html, "text/html").querySelectorAll("area");
+    expect(areas).toHaveLength(2);
+    for (const a of areas) {
+      expect(a.getAttribute("target")).toBe("_blank");
+      expect(a.getAttribute("rel")).toBe("noopener noreferrer");
+    }
+  });
 });

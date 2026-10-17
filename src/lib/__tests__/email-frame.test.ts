@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { forwardKeys, frameCsp, frameSrcDoc } from "@/lib/mail/email-frame";
+import { forwardKeys, frameCsp, frameSrcDoc, interceptLinks } from "@/lib/mail/email-frame";
 import { prepareHtml } from "@/components/mail/email-body";
 import tauriConf from "../../../src-tauri/tauri.conf.json";
 
@@ -72,6 +72,50 @@ describe("app CSP (tauri.conf.json)", () => {
   });
 });
 
+describe("interceptLinks", () => {
+  function setup(inner: string) {
+    const doc = document.implementation.createHTMLDocument("email");
+    doc.body.innerHTML = inner;
+    const opened: string[] = [];
+    const stop = interceptLinks(doc, (url) => opened.push(url));
+    const click = (selector: string) => {
+      const ev = new MouseEvent("click", { bubbles: true, cancelable: true });
+      doc.querySelector(selector)!.dispatchEvent(ev);
+      return ev;
+    };
+    return { opened, click, stop };
+  }
+
+  it("opens a link through the app instead of navigating the frame", () => {
+    const { opened, click } = setup(`<a href="https://info.example.org/x"><span id="t">x</span></a>`);
+    expect(click("#t").defaultPrevented).toBe(true);
+    expect(opened).toEqual(["https://info.example.org/x"]);
+  });
+
+  // An image map's <area> is a link too; a click on the image lands on it.
+  it("handles image-map areas like links", () => {
+    const { opened, click } = setup(`<img usemap="#m" src="data:image/png;base64,AAAA"><map name="m"><area id="rel" href="/" shape="rect" coords="0,0,10,10"><area id="ext" href="https://info.example.org/a"></map>`);
+    expect(click("#rel").defaultPrevented).toBe(true);
+    expect(click("#ext").defaultPrevented).toBe(true);
+    expect(opened).toHaveLength(2);
+    expect(opened[1]).toBe("https://info.example.org/a");
+  });
+
+  it("blocks any other element with an href without opening anything", () => {
+    const { opened, click } = setup(`<math href="/"><mi id="m">x</mi></math>`);
+    expect(click("#m").defaultPrevented).toBe(true);
+    expect(opened).toEqual([]);
+  });
+
+  it("leaves other clicks alone, and stops after cleanup", () => {
+    const { opened, click, stop } = setup(`<p id="p">hi</p><a id="a" href="https://info.example.org/x">x</a>`);
+    expect(click("#p").defaultPrevented).toBe(false);
+    stop();
+    expect(click("#a").defaultPrevented).toBe(false);
+    expect(opened).toEqual([]);
+  });
+});
+
 describe("forwardKeys", () => {
   let cleanups: (() => void)[] = [];
   afterEach(() => {
@@ -122,6 +166,17 @@ describe("forwardKeys", () => {
     expect(seen).toHaveLength(0);
   });
 
+  // Typing into something the email drew to look like a text box must not archive, trash or reply.
+  it("forwards only navigation and modifier shortcuts, never single-key mail actions", () => {
+    const { seen, press } = setup();
+    for (const key of ["e", "#", "Backspace", "!", "d", "s", "v", "r", "a", "R", "f", "c", "x", "u", "y", "t"]) press({ key });
+    expect(seen).toHaveLength(0);
+    for (const key of ["j", "k", "ArrowDown", "ArrowUp", "Escape"]) press({ key });
+    press({ key: "k", metaKey: true });
+    press({ key: "j", ctrlKey: true });
+    expect(seen.map((e) => e.key)).toEqual(["j", "k", "ArrowDown", "ArrowUp", "Escape", "k", "j"]);
+  });
+
   it("does not forward keys from editable elements", () => {
     const { seen, press } = setup("<div contenteditable='true'><span id='e'>x</span></div>");
     press({ key: "j" }, "#e");
@@ -133,12 +188,12 @@ describe("forwardKeys", () => {
     const handler = (e: Event) => e.preventDefault();
     window.addEventListener("keydown", handler);
     cleanups.push(() => window.removeEventListener("keydown", handler));
-    expect(press({ key: "e" }).defaultPrevented).toBe(true);
+    expect(press({ key: "j" }).defaultPrevented).toBe(true);
   });
 
   it("leaves default alone when the app does not handle it", () => {
     const { press } = setup();
-    expect(press({ key: "e" }).defaultPrevented).toBe(false);
+    expect(press({ key: "j" }).defaultPrevented).toBe(false);
   });
 
   it("stops forwarding after cleanup", () => {

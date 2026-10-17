@@ -16,6 +16,16 @@ mod unsubscribe;
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
+/// Whether the main window may load `url`: zMail itself (and the dev server in debug builds)
+/// or an about: document (the email frame's srcdoc). Anything else would replace the app.
+fn app_navigation(url: &url::Url, dev_url: Option<&url::Url>) -> bool {
+    match url.scheme() {
+        "tauri" | "about" => true,
+        "http" | "https" if url.host_str() == Some("tauri.localhost") => true,
+        _ => dev_url.is_some_and(|d| d.origin() == url.origin()),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -57,7 +67,14 @@ pub fn run() {
                 .cloned()
                 .ok_or("tauri.conf.json has no main window")?;
             let handle = app.handle().clone();
+            let dev_url = if cfg!(debug_assertions) {
+                app.config().build.dev_url.clone()
+            } else {
+                None
+            };
             tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
+                // A link that slips past the app's click handlers can't replace zMail with a web page.
+                .on_navigation(move |url| app_navigation(url, dev_url.as_ref()))
                 .on_new_window(move |url, _features| {
                     if matches!(url.scheme(), "http" | "https" | "mailto") {
                         let _ = handle.opener().open_url(url.as_str(), None::<&str>);
@@ -126,4 +143,46 @@ pub fn run() {
                 semantic::shutdown(app);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app_navigation;
+    use url::Url;
+
+    fn u(s: &str) -> Url {
+        Url::parse(s).unwrap()
+    }
+
+    #[test]
+    fn main_window_stays_on_the_app() {
+        for ok in [
+            "tauri://localhost",
+            "tauri://localhost/index.html",
+            "http://tauri.localhost/",
+            "about:srcdoc",
+            "about:blank",
+        ] {
+            assert!(app_navigation(&u(ok), None), "{ok} should load");
+        }
+        for bad in [
+            "https://phish.example/login",
+            "http://localhost:1420/",
+            "https://tauri.localhost.example/",
+            "file:///etc/hosts",
+            "mailto:ann@example.com",
+            "data:text/html,hi",
+        ] {
+            assert!(!app_navigation(&u(bad), None), "{bad} should be refused");
+        }
+    }
+
+    #[test]
+    fn dev_server_only_when_configured() {
+        let dev = u("http://localhost:1420");
+        assert!(app_navigation(&u("http://localhost:1420/"), Some(&dev)));
+        assert!(app_navigation(&u("http://localhost:1420/src/main.tsx"), Some(&dev)));
+        assert!(!app_navigation(&u("http://localhost:1421/"), Some(&dev)));
+        assert!(!app_navigation(&u("https://phish.example/"), Some(&dev)));
+    }
 }

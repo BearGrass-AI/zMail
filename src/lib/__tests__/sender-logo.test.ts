@@ -9,8 +9,21 @@ import { MAX_ENTRIES, logoDomain, resetSenderLogoQueue, useSenderLogos } from "@
 describe("logoDomain", () => {
   const own = ["example.org"];
   it("returns a brand domain, normalized", () => {
-    expect(logoDomain("billing@ramp.com", own)).toBe("ramp.com");
-    expect(logoDomain("Bob@RAMP.Com", own)).toBe("ramp.com");
+    expect(logoDomain("billing@stripe.com", own)).toBe("stripe.com");
+    expect(logoDomain("Bob@STRIPE.Com", own)).toBe("stripe.com");
+  });
+  // A lookup reaches the sender's own DNS and web servers, so a sender must not be able to aim one.
+  it("looks a well-known company up by its listed domain, never the subdomain the sender wrote", () => {
+    expect(logoDomain("news@r-a1b2c3.email.amazon.com", own)).toBe("amazon.com");
+    expect(logoDomain("x@amazon.com.tracker.example", own)).toBeNull();
+    expect(logoDomain("x@notamazon.com", own)).toBeNull();
+  });
+  it("gives any other sender no lookup unless you always load their images", () => {
+    expect(logoDomain("news@r-a1b2c3.tracker.example", own)).toBeNull();
+    expect(logoDomain("billing@shop.example", own)).toBeNull();
+    const allowed = new Set(["billing@shop.example"]);
+    expect(logoDomain("Billing@Shop.example", own, allowed)).toBe("shop.example");
+    expect(logoDomain("other@shop.example", own, allowed)).toBeNull();
   });
   it("skips personal email services", () => {
     expect(logoDomain("friend@gmail.com", own)).toBeNull();

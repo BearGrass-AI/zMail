@@ -1,6 +1,6 @@
 // The email iframe's document: a CSP that blocks script (and remote loads unless
-// allowed), and key presses forwarded to the app so shortcuts keep working while
-// focus is inside an email.
+// allowed), and key presses forwarded to the app so ⌘ shortcuts and J/K keep working
+// while focus is inside an email.
 
 import { DARK_CARD, DARK_LINK, DARK_TEXT, LIGHT_LINK, LIGHT_TEXT } from "./color";
 
@@ -41,22 +41,46 @@ export function frameSrcDoc(css: string, html: string, allowRemote = false) {
   return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${frameCsp(allowRemote)}"><meta charset="utf-8"><style>${css}</style></head><body>${html}</body></html>`;
 }
 
+/**
+ * Link clicks in the email document go to `open` (the app's scheme-checked external open)
+ * instead of navigating the frame: <a>, image-map <area>, and anything else with an href
+ * (SVG and MathML links), which is blocked without opening. Returns a cleanup.
+ */
+export function interceptLinks(doc: Document, open: (url: string) => void): () => void {
+  const onClick = (e: MouseEvent) => {
+    const link = (e.target as Element).closest("a, area, [href]");
+    if (!link) return;
+    e.preventDefault();
+    // The frame's own element classes, so instanceof against this window would fail.
+    const name = link.localName;
+    const href = (link as HTMLAnchorElement).href;
+    if ((name === "a" || name === "area") && typeof href === "string") open(href);
+  };
+  doc.addEventListener("click", onClick);
+  return () => doc.removeEventListener("click", onClick);
+}
+
 const EDITABLE = "input, textarea, select, [contenteditable]";
 // Native inside the email: select all text, copy.
 const NATIVE_MOD = new Set(["a", "c"]);
+// The only single keys that work from inside an email: moving between emails and Escape.
+const NAV_KEYS = new Set(["j", "k", "ArrowDown", "ArrowUp", "Escape"]);
 
 /**
  * Re-dispatches key presses from the email document on `host` (the iframe element) so
  * they bubble to the app's window shortcut handler, which expects an Element target.
- * ⌘A/⌘C stay native, keys typed in an editable field are left alone, and if the app
- * handles a key its default is prevented in the email too. Returns a cleanup.
+ * Only ⌘/Ctrl shortcuts and navigation keys go: an email can draw something that looks
+ * like a text box, and typing into it mustn't archive, trash or reply. ⌘A/⌘C stay
+ * native, keys typed in an editable field are left alone, and if the app handles a key
+ * its default is prevented in the email too. Returns a cleanup.
  */
 export function forwardKeys(doc: Document, host: HTMLElement): () => void {
   const onKey = (e: KeyboardEvent) => {
     if (e.isComposing) return;
     const t = e.target as Element | null;
     if (t && typeof t.closest === "function" && t.closest(EDITABLE)) return;
-    if ((e.metaKey || e.ctrlKey) && NATIVE_MOD.has(e.key.toLowerCase())) return;
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod ? NATIVE_MOD.has(e.key.toLowerCase()) : !NAV_KEYS.has(e.key)) return;
     const copy = new KeyboardEvent("keydown", {
       key: e.key,
       code: e.code,

@@ -104,6 +104,9 @@ export function withSignature(main: string, signatureHtml?: string): string {
   return `${main}<br><div ${SIGNATURE_MARK}="" class="${SIGNATURE_CLASS}">${sanitizeSignature(signatureHtml)}</div>`;
 }
 
+/** Where a reply's or forward's quoted original starts, in drafts written by Outlook (web, new, Mac) and Gmail. */
+const QUOTE_START = "#appendonsend, #divRplyFwdMsg, #mail-editor-reference-message-container, .gmail_quote";
+
 /**
  * A saved draft split into the HTML before its marked signature block and that block's
  * contents. When the draft goes on after the block (Outlook's quoted original under a reply),
@@ -114,6 +117,10 @@ export function splitSavedSignature(html: string): { body: string; signature: st
   const doc = new DOMParser().parseFromString(html, "text/html");
   const block = doc.body.querySelector(`div.${SIGNATURE_CLASS}`);
   if (!block || block.closest("blockquote") || !doc.body.firstChild || !doc.body.lastChild) return null;
+  // Ours always comes before the quoted original. A block under a quote header is the quoted
+  // sender's (a draft started in Outlook or Gmail has none of ours), so it isn't the user's signature.
+  const quote = doc.body.querySelector(QUOTE_START);
+  if (quote && (quote.contains(block) || quote.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING)) return null;
   const range = doc.createRange();
   range.setStartAfter(block);
   range.setEndAfter(doc.body.lastChild);
@@ -336,9 +343,15 @@ async function displaySize(img: HTMLImageElement, src: string, tools: ImageTools
  * attributes for Outlook and inline style for everyone else) so none arrives at its
  * intrinsic size, and turn SVGs, which Gmail blocks, into PNGs at 2× for sharpness.
  * Only touches the block composeHtml marked as the signature, and strips the marker.
+ * With `remote: false` (a signature that came back from the server with a draft) only
+ * embedded images are loaded to measure them; nothing is fetched from the network.
  */
-export async function sizeSignatureImages(html: string, tools: ImageTools = browserImageTools): Promise<string> {
+export async function sizeSignatureImages(html: string, tools: ImageTools = browserImageTools, opts: { remote?: boolean } = {}): Promise<string> {
   if (!html.includes(SIGNATURE_MARK)) return html;
+  if (opts.remote === false) {
+    const { naturalSize } = tools;
+    tools = { ...tools, naturalSize: (src) => (/^\s*data:/i.test(src) ? naturalSize(src) : Promise.resolve(null)) };
+  }
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
   const blocks = [...doc.body.querySelectorAll(`[${SIGNATURE_MARK}]`)];
   // Concurrently, so several slow images don't stack their load timeouts before a send.
