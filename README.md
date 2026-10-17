@@ -155,3 +155,19 @@ pnpm verify        # typecheck, lint, Vitest, cargo test and clippy
 pnpm test          # just the front-end tests
 cd src-tauri && cargo test -- --ignored   # live checks that hit the Keychain or a real API
 ```
+
+## Releasing
+
+zMail updates itself. It looks for a new version about ten seconds after launch and once a day after that (you can turn this off), and installs one only when you say so. The updater reads `latest.json` from the newest GitHub release and won't install anything that isn't signed with the updater key. Release builds only, Apple silicon only for now.
+
+To make a release, bump the version in `src-tauri/tauri.conf.json`, `package.json` and `src-tauri/Cargo.toml` (the script stops if they don't match), commit, and run:
+
+```sh
+pnpm release --notes "What changed, in a sentence or two"
+```
+
+It builds the app, signs it with my Developer ID (`Developer ID Application: Zachary Rossmiller (V2P99VF75Q)`), packs it into a DMG with [create-dmg](https://github.com/create-dmg/create-dmg) (`brew install create-dmg`), and notarizes and staples the DMG using the notarytool profile called `notary`. Set `APPLE_SIGNING_IDENTITY` to sign with a different certificate, `NOTARY_PROFILE` to use a different profile, or `NOTARY_PROFILE=` to skip notarizing. You make a profile once with `xcrun notarytool store-credentials notary`. For a quick local build, `--adhoc` signs ad hoc and skips notarizing; that copy only opens without warnings on the Mac that built it. Use `--notes-file` for longer notes, and `--skip-jenkins` to skip create-dmg's Finder step, which opens Finder windows to lay out the DMG.
+
+Everything ends up in `release/`: the DMG, the update bundle (`.app.tar.gz` and its `.sig`) and `latest.json`. Nothing is published unless you add `--publish`, which creates the GitHub release `v<version>` at the current commit and uploads all four files (it needs `gh`, signed in, and the commit pushed). Without it, the script prints the `gh release create` command so you can look things over first.
+
+The updater's private key and its password live in the macOS Keychain (service `com.zach.zmail.updater`, accounts `private-key` and `password`), and the script reads them only for the build. Back them up somewhere safe: without that key, copies already out there can't be updated, and a new key means everyone has to download the next version by hand.

@@ -2,7 +2,8 @@
 // only ever sit in memory here; `partialize` strips them before saving.
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { mirroredStorage } from "./web-store";
 import type { Bucket, Category } from "@/lib/types";
 import { providerType, type ModelInfo, type ProviderGroup, type ProviderTypeId } from "@/lib/ai/catalog";
 import { deleteSecret, getSecret, setSecret } from "@/lib/secrets";
@@ -187,6 +188,7 @@ export const useSettings = create<SettingsStore>()(
     {
       name: "zmail.settings",
       version: 2,
+      storage: createJSONStorage(() => mirroredStorage),
       // API keys never touch localStorage; they live in the Keychain.
       partialize: ({ set: _s, setHue: _h, addProvider: _a, updateProvider: _u, removeProvider: _r, setRole: _o, ...rest }) => ({
         ...rest,

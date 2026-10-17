@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- The DMG window's background picture (Silver). Finder draws the two icons and their labels on
+     top, in black whatever the system appearance: zMail centered at (180, 188) and Applications at
+     (460, 188), 128 px icons. The design fills the top 400 px; the picture is 470 tall because
+     newer Finders keep a toolbar that takes about 67 px of the 470 px window. Re-export with
+     scripts/dmg/render-background.cjs after changing it. -->
+<meta charset="utf-8">
+<style>
+html,body{margin:0;width:640px;height:470px;overflow:hidden}
+.stage{position:relative;width:640px;height:470px;overflow:hidden;
+  background:radial-gradient(420px 260px at 50% 190px,#f4f6f9 0%,#e9ecf1 55%,#dfe3ea 100%);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif}
+.spot{position:absolute;left:50%;top:190px;width:520px;height:220px;transform:translate(-50%,-50%);border-radius:50%;
+  background:radial-gradient(closest-side,rgba(64,128,240,.16),rgba(64,128,240,.04) 60%,transparent)}
+.rule{position:absolute;left:150px;right:150px;top:318px;height:1px;background:linear-gradient(90deg,transparent,rgba(0,0,0,.12),transparent)}
+.grain{position:absolute;inset:0;opacity:.08;mix-blend-mode:overlay;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.chev{position:absolute;left:276px;top:172px;width:88px;height:32px}
+.cap{position:absolute;left:0;right:0;top:340px;text-align:center;font-weight:500;font-size:12px;line-height:1;letter-spacing:.02em;color:rgba(30,35,45,.5)}
+</style>
+<div class="stage">
+  <div class="spot"></div><div class="rule"></div><div class="grain"></div>
+  <svg class="chev" viewBox="0 0 88 32" aria-hidden="true">
+    <path d="M14 7 L23 16 L14 25" fill="none" stroke="#2f6fe0" stroke-opacity=".3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M36 7 L45 16 L36 25" fill="none" stroke="#2f6fe0" stroke-opacity=".6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M58 7 L67 16 L58 25" fill="none" stroke="#2f6fe0" stroke-opacity="1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div class="cap">Drag to Applications to install</div>
+</div>

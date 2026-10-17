@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 108",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings",
-    "audit": "pnpm audit --prod && cd src-tauri && cargo audit"
+    "audit": "pnpm audit --prod && cd src-tauri && cargo audit",
+    "release": "bash scripts/release.sh"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
@@ -22,6 +23,8 @@
     "@tanstack/react-virtual": "3.13.12",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
     "dompurify": "^3.4.16",

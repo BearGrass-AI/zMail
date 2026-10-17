@@ -1,7 +1,8 @@
 // Per-user folder UI state: favorites, expanded tree nodes, recent move targets.
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { mirroredStorage } from "./web-store";
 
 interface FolderPrefs {
   favorites: string[];
@@ -23,6 +24,6 @@ export const useFolderPrefs = create<FolderPrefs>()(
       setExpanded: (id, open) => set((s) => ({ expanded: { ...s.expanded, [id]: open } })),
       pushRecent: (id) => set((s) => ({ recent: [id, ...s.recent.filter((r) => r !== id)].slice(0, 8) })),
     }),
-    { name: "zmail.folders", partialize: ({ favorites, expanded, recent }) => ({ favorites, expanded, recent }) },
+    { name: "zmail.folders", storage: createJSONStorage(() => mirroredStorage), partialize: ({ favorites, expanded, recent }) => ({ favorites, expanded, recent }) },
   ),
 );

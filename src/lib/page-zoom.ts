@@ -2,6 +2,7 @@
 // view (the email frame included) and the level comes back at the next launch.
 
 import { isTauri } from "@tauri-apps/api/core";
+import { mirroredStorage } from "./web-store";
 
 export const ZOOM_MIN = 0.8;
 export const ZOOM_MAX = 1.6;
@@ -29,7 +30,7 @@ export function zoomShortcut(e: ZoomKey): 1 | -1 | 0 | null {
 
 function readSaved(): number {
   try {
-    return clampZoom(localStorage.getItem(KEY));
+    return clampZoom(mirroredStorage.getItem(KEY) as string | null);
   } catch {
     return 1;
   }
@@ -37,8 +38,8 @@ function readSaved(): number {
 
 function save(level: number) {
   try {
-    if (level === 1) localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, String(level));
+    if (level === 1) void mirroredStorage.removeItem(KEY);
+    else void mirroredStorage.setItem(KEY, String(level));
   } catch (err) {
     console.warn("[zoom] couldn't save the zoom level", err);
   }

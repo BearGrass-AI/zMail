@@ -1,7 +1,8 @@
 // Which models have been seen working (or failing) with zMail's tools. Keyed by ModelChoice.key.
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { mirroredStorage } from "@/lib/web-store";
 
 export type ModelHealth = "ok" | "struggled";
 
@@ -18,6 +19,7 @@ export const useModelHealth = create<ModelHealthStore>()(
     }),
     {
       name: "zmail.model-health",
+      storage: createJSONStorage(() => mirroredStorage),
       partialize: (s) => ({ health: s.health }),
       // Version 1: one batch of calls into folders that didn't exist could mark a model "struggled". Marks
       // saved before then aren't trustworthy, so they're dropped; "ok" marks stay.

@@ -28,6 +28,7 @@ base64 = "0.22"
 url = "2"
 hickory-resolver = { version = "0.26", default-features = false, features = ["system-config", "tokio"] }
 tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-single-instance = "2.5.0"
@@ -45,6 +46,8 @@ objc2-map-kit = { version = "0.3", features = ["MKDirections", "MKDirectionsRequ
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNUserNotificationCenter", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger"] }
 block2 = "0.6"
 
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
 
 [lints.clippy]
 # On top of `cargo clippy -D warnings` (pnpm verify): a few stricter lints that fit this crate.
@@ -73,3 +76,8 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# Proc macros and build scripts run at build time only. Xcode 27's strip leaves their dylibs
+# unloadable ("mis-aligned LINKEDIT string pool"), which breaks `tauri build`.
+[profile.release.build-override]
+strip = false

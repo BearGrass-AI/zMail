@@ -26,3 +26,6 @@ dist-ssr
 # local tooling
 .playwright-mcp/
 .superpowers/
+
+# release builds (scripts/release.sh)
+release/

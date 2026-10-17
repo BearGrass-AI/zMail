@@ -33,6 +33,9 @@ pub fn run() {
     }
     builder
         .plugin(tauri_plugin_opener::init())
+        // In-app updates (the endpoint and public key are in tauri.conf.json) and the relaunch after one.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // Before the window exists, so its web view starts with spell checking on.
             spelling::enable();
