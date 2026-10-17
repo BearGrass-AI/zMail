@@ -12,8 +12,9 @@ export async function saveFile(filename: string, base64: string, to: "downloads"
   return null;
 }
 
-/** What `open_path` rejects with for a file type that can run code (matches `RISKY_MESSAGE` in files.rs). */
-export const RISKY_MESSAGE = "This file type can run code, so zMail showed it in Finder instead.";
+/** What `open_path` rejects with for anything but a document, picture or recording (matches `RISKY_MESSAGE` in files.rs). */
+export const RISKY_MESSAGE =
+  "zMail opens only documents, pictures and media on a click, so it showed this file in Finder instead.";
 
 export async function openPath(path: string) {
   if (isTauri()) await invoke("open_path", { path });

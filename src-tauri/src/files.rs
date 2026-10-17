@@ -2,9 +2,12 @@
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::fs::{DirBuilder, OpenOptions};
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
 
@@ -134,14 +137,15 @@ fn quarantine(path: &Path) {
 #[cfg(not(target_os = "macos"))]
 fn quarantine(_path: &Path) {}
 
-pub const RISKY_MESSAGE: &str =
-    "This file type can run code, so zMail showed it in Finder instead.";
+pub const RISKY_MESSAGE: &str = "zMail opens only documents, pictures and media on a click, so it showed this file in Finder instead.";
 
-/// File types that run code or launch something when opened. These are revealed, never opened.
+/// Anything but a document, picture or recording: revealed, never opened. An allowlist, because
+/// the types that run code or launch something when opened (apps, scripts, installers,
+/// configuration profiles, disk images, web pages) are too many to list and keep growing.
 pub fn risky(name: &str) -> bool {
     let lower = name.to_lowercase();
     let Some((stem, ext)) = lower.rsplit_once('.') else {
-        return false;
+        return true;
     };
     if ext == "zip" {
         // A zipped app; `write_new` turns a second `x.app.zip` into `x.app (2).zip`.
@@ -157,28 +161,51 @@ pub fn risky(name: &str) -> bool {
         };
         return stem.ends_with(".app");
     }
-    matches!(
+    !matches!(
         ext,
-        "app"
-            | "command"
-            | "sh"
-            | "bash"
-            | "zsh"
-            | "csh"
-            | "tool"
-            | "terminal"
-            | "workflow"
-            | "scpt"
-            | "scptd"
-            | "applescript"
-            | "pkg"
-            | "mpkg"
-            | "dmg"
-            | "jar"
-            | "webloc"
-            | "inetloc"
-            | "fileloc"
-            | "url"
+        // Documents (no macro-enabled Office types).
+        "pdf"
+            | "txt"
+            | "md"
+            | "csv"
+            | "tsv"
+            | "rtf"
+            | "doc"
+            | "docx"
+            | "xls"
+            | "xlsx"
+            | "ppt"
+            | "pptx"
+            | "odt"
+            | "ods"
+            | "odp"
+            | "pages"
+            | "numbers"
+            | "key"
+            | "ics"
+            | "vcf"
+            | "eml"
+            // Pictures (not SVG: it opens in the browser).
+            | "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "heic"
+            | "heif"
+            | "webp"
+            | "tif"
+            | "tiff"
+            | "bmp"
+            // Recordings.
+            | "mp3"
+            | "m4a"
+            | "wav"
+            | "aac"
+            | "aif"
+            | "aiff"
+            | "mp4"
+            | "m4v"
+            | "mov"
     )
 }
 
@@ -205,13 +232,21 @@ fn attachment_roots(app: &AppHandle) -> Vec<PathBuf> {
     roots
 }
 
+/// textutil's name for the format this file name's extension promises, if it's one zMail reads.
+fn textutil_format(name: &str) -> Option<&'static str> {
+    match name.to_lowercase().rsplit_once('.').map(|(_, e)| e) {
+        Some("doc") => Some("doc"),
+        Some("docx") => Some("docx"),
+        Some("rtf") => Some("rtf"),
+        Some("rtfd") => Some("rtfd"),
+        Some("odt") => Some("odt"),
+        _ => None,
+    }
+}
+
 /// Whether textutil can turn this file name's extension into text.
 pub fn extractable(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    matches!(
-        lower.rsplit_once('.').map(|(_, e)| e),
-        Some("doc" | "docx" | "rtf" | "rtfd" | "odt")
-    )
+    textutil_format(name).is_some()
 }
 
 /// Plain text of a Word, RTF or OpenDocument file, via macOS textutil.
@@ -231,16 +266,110 @@ pub fn extract_text(app: AppHandle, filename: String, base64: String) -> Result<
         .map_err(|e| e.to_string())?
         .join("zmail-extract");
     let dir = private_dir(&parent).map_err(|e| e.to_string())?;
-    let out = write_new(&dir, &name, &bytes).and_then(|path| {
-        std::process::Command::new("/usr/bin/textutil")
-            .args(["-convert", "txt", "-stdout"])
-            .arg(&path)
-            .output()
-    });
+    let text = write_new(&dir, &name, &bytes)
+        .map_err(|e| e.to_string())
+        .and_then(|path| textutil_text(&path));
     let _ = std::fs::remove_dir_all(&dir);
-    let out = out.map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
+    text
+}
+
+/// How long textutil may take on one file.
+const EXTRACT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The most text kept from one file: well past the 20,000 characters the assistant reads of it
+/// (`PER_FILE_CHARS` in file-text.ts).
+const EXTRACT_MAX_BYTES: usize = 256 * 1024;
+
+/// What a helper process wrote, and whether it exited cleanly.
+struct Bounded {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    success: bool,
+}
+
+/// Up to `max` bytes from `pipe`, read on a thread; the receiver gets them at end of output or
+/// once `max` have arrived.
+fn read_capped<R: Read + Send + 'static>(pipe: Option<R>, max: usize) -> mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
+    if let Some(pipe) = pipe {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = pipe.take(max as u64).read_to_end(&mut buf);
+            let _ = tx.send(buf);
+        });
+    }
+    rx
+}
+
+/// Run `cmd` for at most `limit`, keeping at most `max_bytes` of its output. It's killed once it
+/// runs out of time (an error) or has written `max_bytes` (the text so far is kept).
+fn run_bounded(mut cmd: Command, limit: Duration, max_bytes: usize) -> Result<Bounded, String> {
+    let deadline = Instant::now() + limit;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let stdout = read_capped(child.stdout.take(), max_bytes);
+    let stderr = read_capped(child.stderr.take(), 4096);
+    let stop = |child: &mut std::process::Child| {
+        let _ = child.kill();
+        let _ = child.wait();
+    };
+    let too_long = || "took too long to read this file".to_string();
+    let Ok(out) = stdout.recv_timeout(deadline.saturating_duration_since(Instant::now())) else {
+        stop(&mut child);
+        return Err(too_long());
+    };
+    if out.len() >= max_bytes {
+        stop(&mut child);
+        return Ok(Bounded {
+            stdout: out,
+            stderr: Vec::new(),
+            success: true,
+        });
+    }
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            Ok(None) => {
+                stop(&mut child);
+                return Err(too_long());
+            }
+            Err(e) => {
+                stop(&mut child);
+                return Err(e.to_string());
+            }
+        }
+    };
+    Ok(Bounded {
+        stdout: out,
+        stderr: stderr
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap_or_default(),
+        success: status.success(),
+    })
+}
+
+/// Plain text of `path` via textutil, read only as the format its extension names. Left to
+/// itself textutil picks the parser from the bytes, so a web page named `.docx` would go to its
+/// HTML importer; `-noload` keeps it from fetching anything a document links to.
+fn textutil_text(path: &Path) -> Result<String, String> {
+    let format = path
+        .file_name()
+        .and_then(|n| textutil_format(&n.to_string_lossy()))
+        .ok_or("unsupported file type")?;
+    let mut cmd = Command::new("/usr/bin/textutil");
+    cmd.args([
+        "-format", format, "-noload", "-convert", "txt", "-stdout", "--",
+    ])
+    .arg(path);
+    let out = run_bounded(cmd, EXTRACT_TIMEOUT, EXTRACT_MAX_BYTES)?;
+    let err = String::from_utf8_lossy(&out.stderr);
+    // textutil exits 0 when a file isn't in the format it was told; it says so and writes nothing.
+    if !out.success || (out.stdout.is_empty() && !err.trim().is_empty()) {
         return Err(err
             .lines()
             .next()
@@ -321,20 +450,53 @@ mod tests {
             "a.url",
             "Thing.app.zip",
             "Thing.app (2).zip",
+            // Installers, disk images, web pages and scripts a denylist would have to keep up with.
+            "Invoice.mobileconfig",
+            "a.provisionprofile",
+            "Catalog.iso",
+            "a.img",
+            "a.sparseimage",
+            "a.sparsebundle",
+            "a.cdr",
+            "Statement.html",
+            "a.htm",
+            "a.xhtml",
+            "a.svg",
+            "a.webarchive",
+            "a.py",
+            "a.rb",
+            "a.pl",
+            "a.php",
+            "Thing.app.tar.gz",
+            "a.tgz",
+            "a.7z",
+            "a.shortcut",
+            "a.docm",
+            // No extension: nothing says what it is.
+            "command",
+            "shapp",
         ] {
             assert!(risky(name), "{name} should be risky");
         }
         for name in [
             "report.pdf",
+            "Report.PDF",
             "photos.zip",
             "a (2).zip",
             "notes.txt",
-            "command",
-            "shapp",
             "budget.xlsx",
+            "slides.pptx",
+            "letter.docx",
+            "photo.jpeg",
+            "scan.heic",
+            "invite.ics",
+            "call.m4a",
+            "clip.mov",
         ] {
             assert!(!risky(name), "{name} should be safe");
         }
+        // The webview recognises the refusal by its text.
+        assert!(include_str!("../../src/lib/files.ts").contains(RISKY_MESSAGE));
     }
 
     #[test]
@@ -373,6 +535,57 @@ mod tests {
         assert!(!extractable("docx"));
         assert_eq!(safe_name("../../a.docx"), "_.._a.docx");
         assert!(extractable(&safe_name("../../a.docx")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn textutil_reads_only_the_format_the_name_promises() {
+        let dir = std::env::temp_dir().join(format!("zmail-textutil-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A web page named like a Word file must not reach textutil's HTML importer.
+        let fake = dir.join("brief.docx");
+        std::fs::write(
+            &fake,
+            "<html><body><p>Hello <b>there</b></p><img src=\"http://example.com/b.png\"></body></html>",
+        )
+        .unwrap();
+        assert!(textutil_text(&fake).is_err(), "HTML named .docx was read");
+        // A real Word file still reads.
+        let plain = dir.join("notes.txt");
+        std::fs::write(&plain, "Quarterly plan\n").unwrap();
+        let real = dir.join("plan.docx");
+        let made = std::process::Command::new("/usr/bin/textutil")
+            .args(["-convert", "docx", "-output"])
+            .arg(&real)
+            .arg(&plain)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        assert_eq!(textutil_text(&real).unwrap().trim(), "Quarterly plan");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_helper_that_runs_too_long_is_stopped() {
+        let start = std::time::Instant::now();
+        let mut cmd = std::process::Command::new("/bin/sleep");
+        cmd.arg("10");
+        assert!(run_bounded(cmd, Duration::from_millis(300), 1024).is_err());
+        assert!(start.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn a_helper_that_writes_too_much_is_cut_off() {
+        let start = std::time::Instant::now();
+        // `yes` writes forever.
+        let out = run_bounded(
+            std::process::Command::new("/usr/bin/yes"),
+            Duration::from_secs(10),
+            1000,
+        )
+        .unwrap();
+        assert_eq!(out.stdout.len(), 1000);
+        assert!(start.elapsed() < Duration::from_secs(3));
     }
 
     #[test]
