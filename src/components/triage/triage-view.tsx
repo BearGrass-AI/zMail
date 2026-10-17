@@ -8,7 +8,7 @@ import type { MailSection } from "@/lib/sections";
 import { cn } from "@/lib/utils";
 import { unreadCount } from "@/lib/mail/unread";
 import { EmailContextMenu, QuickActions, useEmailActions } from "../email-actions";
-import { BUCKET_META, CATEGORY_META, SECTION_ICON } from "@/lib/meta";
+import { BUCKET_META, categoryMeta, SECTION_ICON } from "@/lib/meta";
 import { SenderAvatar, Tile, relTime } from "../meta";
 import { EventChip } from "../event-chip";
 import { DateChip, SectionTag } from "../date-chip";
@@ -88,7 +88,7 @@ function Card({ email, rich, order }: { email: Email; rich: boolean; order: () =
                   <AccountDot accountId={email.accountId} className="size-2 border-[1.5px]" />
                 </div>
               )}
-              {!rich && category && <Tile icon={CATEGORY_META[category].icon} k={category} size={22} />}
+              {!rich && category && <Tile icon={categoryMeta(category).icon} k={category} size={22} />}
             </RowCheck>
             <span className={cn("truncate text-[12.5px]", email.unread ? "font-semibold" : "font-medium")}>{email.from.name}</span>
             <span className={cn("ml-auto shrink-0 text-[11.5px] text-foreground/40 tabular-nums transition-opacity", !sel.selecting && "group-hover:opacity-0")}>

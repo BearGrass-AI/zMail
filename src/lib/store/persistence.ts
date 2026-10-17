@@ -2,7 +2,7 @@
 // saved to the local database and restored on launch.
 
 import type { AutoRule } from "@/lib/rules";
-import type { Bucket, Category, SenderHabit, Triage } from "@/lib/types";
+import { BUCKETS, CATEGORIES, type Bucket, type Category, type SenderHabit, type Triage } from "@/lib/types";
 import type { MockOverlay } from "@/lib/mail/mock-provider";
 import { kvSet } from "@/lib/db";
 import { consistentBucket } from "@/lib/ai/triage";
@@ -146,8 +146,13 @@ export function restore(snap: Snapshot, _habits: Map<string, SenderHabit>) {
       categoryOverrides: snap.categoryOverrides ?? {},
       dismissed: new Set(snap.dismissed ?? []),
       snoozed: snap.snoozed ?? {},
-      // Sorted before the bucket/category consistency rule: apply it now, no re-sort needed.
-      triage: Object.fromEntries(Object.entries(snap.triage ?? {}).map(([id, t]) => [id, { ...t, bucket: consistentBucket(t) }])),
+      // An entry with a bucket or kind zMail doesn't know is dropped, so the email is sorted again. Sorted before
+      // the bucket/category consistency rule: apply it now, no re-sort needed.
+      triage: Object.fromEntries(
+        Object.entries(snap.triage ?? {})
+          .filter(([, t]) => BUCKETS.includes(t?.bucket) && CATEGORIES.includes(t.category))
+          .map(([id, t]) => [id, { ...t, bucket: consistentBucket(t) }]),
+      ),
       hiddenCalendars: new Set(snap.hiddenCalendars ?? []),
       imageSenders: new Set(snap.imageSenders ?? []),
       accountFilter: snap.accountFilter && s.accounts.some((a) => a.id === snap.accountFilter) ? snap.accountFilter : null,

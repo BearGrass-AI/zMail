@@ -9,7 +9,7 @@ import { useSettings } from "@/lib/settings";
 import { cachedSummary, summarize } from "@/lib/ai/summaries";
 import { cn } from "@/lib/utils";
 import { EmailContextMenu, QuickActions, useEmailActions } from "../email-actions";
-import { CATEGORY_META } from "@/lib/meta";
+import { categoryMeta } from "@/lib/meta";
 import { SenderAvatar, Tile, relTime } from "../meta";
 import { EventChip } from "../event-chip";
 import { DateChip, SectionTag } from "../date-chip";
@@ -160,7 +160,7 @@ export function CompactRow({ email, showSnippet, order, flag }: { email: Email; 
         >
           <span className={cn("size-1.5 shrink-0 rounded-full", email.unread ? "bg-primary" : "bg-transparent")} />
           <RowCheck checked={sel.checked} selecting={sel.selecting} onCheck={sel.onCheck} size={24}>
-            {category && <Tile icon={CATEGORY_META[category].icon} k={category} size={24} />}
+            {category && <Tile icon={categoryMeta(category).icon} k={category} size={24} />}
           </RowCheck>
           <span className={cn("w-[160px] shrink-0 truncate text-[13px] group-data-detail/main:w-[110px]", email.unread ? "font-semibold" : "font-medium text-foreground/85")}>
             {email.from.name}
@@ -217,7 +217,7 @@ export const InboxRow = memo(function InboxRow({ email }: { email: Email }) {
               <SenderAvatar contact={email.from} junk={junk} />
               {category && (
                 <span className="absolute -right-1 -bottom-1 rounded-full ring-2 ring-[var(--pane)]">
-                  <Tile icon={CATEGORY_META[category].icon} k={category} size={16} className="rounded-full! [&_svg]:size-[9px]!" />
+                  <Tile icon={categoryMeta(category).icon} k={category} size={16} className="rounded-full! [&_svg]:size-[9px]!" />
                 </span>
               )}
             </div>
