@@ -4,6 +4,7 @@
 import type { Attachment, Contact, Email, Folder } from "@/lib/types";
 import type { InlineImage } from "@/lib/signature";
 import { parseListUnsubscribe } from "@/lib/mail/unsubscribe";
+import { isSingleMailbox } from "@/lib/mail/address";
 import { clipText } from "@/lib/mail/clip-text";
 
 // ---- API shapes (subset) ---------------------------------------------------------
@@ -114,9 +115,22 @@ export function encodeBase64Url(text: string): string {
 
 const CONTROL = /\p{Cc}+/gu;
 
+/** `"Name" <addr>` as its name and angle-addr, or null for a bare address. String scans, not a regex: header text is sender-controlled and a backtracking pattern stalled on long whitespace runs. */
+function splitNameAddr(part: string): { name: string; addr: string } | null {
+  const lt = part.lastIndexOf("<");
+  if (lt < 0 || !part.endsWith(">")) return null;
+  let name = part.slice(0, lt).trim();
+  if (/[<>]/.test(name)) return null;
+  if (name.startsWith('"')) name = name.slice(1);
+  if (name.endsWith('"')) name = name.slice(0, -1);
+  return { name, addr: part.slice(lt + 1, -1) };
+}
+
 /**
  * Parse `"Name" <addr>, other@x` into contacts. Takes the raw header: only display names are
  * RFC 2047-decoded (after parsing), so an encoded-word can't smuggle in an address, comma or line break.
+ * An address that isn't exactly one mailbox (`<a@x; b@y>`) becomes "": kept whole, the composer would
+ * split it into several recipients.
  */
 export function parseAddressList(value: string | undefined): Contact[] {
   if (!value) return [];
@@ -125,9 +139,10 @@ export function parseAddressList(value: string | undefined): Contact[] {
   for (const raw of value.match(/(?:"[^"]*"|[^,])+/g) ?? []) {
     const part = raw.trim();
     if (!part) continue;
-    const m = /^(?:"?([^"<]*?)"?\s*)?<([^>]+)>$/.exec(part);
-    const address = (m ? m[2] : part).replace(CONTROL, "").trim().toLowerCase();
-    const name = decodeMimeWords(m?.[1] || (m ? m[2] : part)).replace(CONTROL, " ").trim();
+    const m = splitNameAddr(part);
+    const parsed = (m ? m.addr : part).replace(CONTROL, "").trim().toLowerCase();
+    const address = isSingleMailbox(parsed) ? parsed : "";
+    const name = decodeMimeWords(m?.name || (m ? m.addr : part)).replace(CONTROL, " ").trim();
     out.push({ name, address });
   }
   return out;
@@ -161,11 +176,19 @@ function header(p: GPart, name: string) {
   return v === undefined ? undefined : decodeMimeWords(v);
 }
 
+/** "<a@b>" -> "a@b". trim() and slices rather than a regex: `[>\s]+$` backtracked quadratically on a long whitespace run. */
+function contentId(v: string) {
+  let id = v.trim();
+  if (id.startsWith("<")) id = id.slice(1);
+  if (id.endsWith(">")) id = id.slice(0, -1);
+  return id.trim();
+}
+
 /** Image parts with a Content-ID ("<a@b>" -> "a@b"); data is inline base64url or fetched by attachmentId. */
 export function inlineParts(root: GPart): { cid: string; mimeType: string; data?: string; attachmentId?: string }[] {
   const out: { cid: string; mimeType: string; data?: string; attachmentId?: string }[] = [];
   const walk = (p: GPart) => {
-    const cid = (header(p, "Content-ID") ?? "").replace(/^[\s<]+|[>\s]+$/g, "");
+    const cid = contentId(header(p, "Content-ID") ?? "");
     if (cid && p.mimeType.toLowerCase().startsWith("image/") && (p.body?.data || p.body?.attachmentId)) {
       out.push({ cid, mimeType: p.mimeType, data: p.body.data, attachmentId: p.body.attachmentId });
     }
@@ -204,7 +227,13 @@ export function extractBodies(root: GPart) {
 function htmlToText(html: string) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   doc.querySelectorAll("style,script").forEach((n) => n.remove());
-  return (doc.body.textContent ?? "").replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  // Each whitespace run with a line break in it becomes that break plus what followed the last one.
+  // A callback on plain `\s+` rather than `\s+\n`, which backtracked quadratically on a long run without one.
+  const text = (doc.body.textContent ?? "").replace(/\s+/g, (run) => {
+    const nl = run.lastIndexOf("\n");
+    return nl < 0 ? run : `\n${run.slice(nl + 1)}`;
+  });
+  return text.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** Which zMail folder a message lives in, from its labels. */

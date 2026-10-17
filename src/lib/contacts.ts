@@ -8,6 +8,7 @@ import { request } from "@/lib/transport";
 import { accessToken } from "@/lib/oauth";
 import { graph } from "@/lib/microsoft/graph";
 import { held } from "@/lib/store/held";
+import { isSingleMailbox } from "@/lib/mail/address";
 
 export interface Person {
   /** "First Last", even when the directory stores "Last, First". */
@@ -55,7 +56,8 @@ const SOURCE_RANK: Record<Person["source"], number> = { directory: 2, contacts: 
 export function mergePeople(q: string, lists: Person[][], limit = 8): Person[] {
   const byAddr = new Map<string, Person>();
   for (const p of lists.flat()) {
-    if (!p.address.includes("@")) continue;
+    // Picking someone inserts their address into a To field: never one that is really several.
+    if (!p.address.includes("@") || !isSingleMailbox(p.address)) continue;
     const key = p.address.toLowerCase();
     const prev = byAddr.get(key);
     byAddr.set(key, prev ? { ...p, ...prev, title: prev.title ?? p.title, department: prev.department ?? p.department, source: SOURCE_RANK[p.source] > SOURCE_RANK[prev.source] ? p.source : prev.source } : p);

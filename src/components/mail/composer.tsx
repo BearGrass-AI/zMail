@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { useMail, type Compose } from "@/lib/store";
 import type { Email } from "@/lib/types";
 import { forwardBody, replyRecipients } from "@/lib/mail/compose-text";
+import { splitRecipients } from "@/lib/mail/address";
 import { cn } from "@/lib/utils";
 import { draftRequest } from "@/lib/ai/assistant/draft-request";
 import { useAssistant } from "@/lib/ai/assistant/state";
@@ -293,10 +294,18 @@ export function Composer() {
     );
   const reading = files.some((f) => f.read && f.status.state === "reading");
 
-  const split = (v: string) => v.split(/[,;]/).map((x) => x.trim()).filter(Boolean);
+  /** The To, Cc and Bcc fields as recipients, or null after saying which entry isn't a single address. */
+  const recipientsOf = (d: Doc, failed: string) => {
+    try {
+      return { to: splitRecipients(d.to), cc: splitRecipients(d.cc), bcc: splitRecipients(d.bcc) };
+    } catch (err) {
+      toast.error(failed, { description: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  };
 
-  /** The email as it would be sent (and as a draft is saved). */
-  const buildRequest = async (d: Doc, to = split(d.to), cc = split(d.cc), bcc = split(d.bcc)): Promise<SendRequest> => {
+  /** The email as it would be sent (and as a draft is saved), to recipients already checked by recipientsOf. */
+  const buildRequest = async (d: Doc, to: string[], cc: string[], bcc: string[]): Promise<SendRequest> => {
     // A draft's signature came from the server: measuring its images mustn't fetch anything.
     const { html, inline } = inlineDataImages(await sizeSignatureImages(composeRichHtml(d.body, signature), undefined, { remote: sigId !== DRAFT_SIG }));
     return {
@@ -396,6 +405,9 @@ export function Composer() {
       toast.error(`Attachments are over ${formatBytes(limit)}`, { description: "Share large files as a link instead: use Insert from Drive." });
       return false;
     }
+    // Checked before anything is taken off the schedule.
+    const rcpt = recipientsOf(doc, "Couldn't save the draft");
+    if (!rcpt) return false;
     saveInFlight.current = true;
     setSaving(true);
     const mine = session;
@@ -409,7 +421,7 @@ export function Composer() {
     try {
       // Off the schedule before the save: by itself, a scheduled email only ever sends what the user scheduled.
       if (unschedule) putBack = await withdrawScheduled(unschedule);
-      const msg = await buildRequest(doc);
+      const msg = await buildRequest(doc, rcpt.to, rcpt.cc, rcpt.bcc);
       const res = await saveDraftAction(from.id, msg, await usableDraft(from.id, draft, mine));
       result = { id: res.draftId, acct: from.id };
       if (ours(mine)) {
@@ -473,9 +485,9 @@ export function Composer() {
       return toast.error(`Attachments are over ${formatBytes(limit)}`, {
         description: "Share large files as a link instead: use Insert from Drive.",
       });
-    const to = split(doc.to);
-    const cc = split(doc.cc);
-    const bcc = split(doc.bcc);
+    const rcpt = recipientsOf(doc, "Couldn't send");
+    if (!rcpt) return;
+    const { to, cc, bcc } = rcpt;
     if (!to.length) return toast.error("Add at least one recipient");
     inFlight.current = true;
     setSending(true);
@@ -509,9 +521,9 @@ export function Composer() {
       return toast.error(`Attachments are over ${formatBytes(limit)}`, {
         description: "Share large files as a link instead: use Insert from Drive.",
       });
-    const to = split(doc.to);
-    const cc = split(doc.cc);
-    const bcc = split(doc.bcc);
+    const rcpt = recipientsOf(doc, "Couldn't schedule");
+    if (!rcpt) return;
+    const { to, cc, bcc } = rcpt;
     if (!to.length) return toast.error("Add at least one recipient");
     inFlight.current = true;
     setSending(true);

@@ -11,6 +11,7 @@ import { useMail } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
 import { DARK_CSS, LIGHT_CSS, forwardKeys, frameSrcDoc, interceptLinks } from "@/lib/mail/email-frame";
 import { adaptedFor, canRenderDark, darkKindFor, sanitizedFor, type DarkKind } from "@/lib/mail/dark-mode";
+import { MAX_ADAPT_CHARS } from "@/lib/mail/dark-adapt";
 import { useAppDark } from "@/lib/theme";
 
 export async function openExternal(url: string) {
@@ -121,13 +122,22 @@ export function prepareHtml(html: string, allowImages: boolean, mode: "light" | 
   // the reverse, so white-on-white text from a dark card can't happen.
   const ownDark = kind === "own" || kind === "simple";
   const [onDark, onLight] = ownDark ? ["(min-width: 0px)", "(max-width: 0px)"] : ["(max-width: 0px)", "(min-width: 0px)"];
+  // Stylesheet text counted so far. Past the dark adapter's size bound counting stops and
+  // the email just offers "Load images": this runs during render, so its work stays bounded.
+  let counted = 0;
   for (const style of doc.querySelectorAll("style")) {
     const css = style.textContent ?? "";
     // Remote url()/@import in a stylesheet: left as is (the CSP blocks them), but
-    // counted so a styles-only email still offers "Load images".
+    // counted so a styles-only email still offers "Load images". Each whitespace run
+    // follows a fixed token, so two quantifiers never compete for the same spaces:
+    // overlapping ones backtracked for seconds on a sender's long run of spaces.
     if (!allowImages) {
-      blocked += (css.match(/url\(\s*["']?\s*https?:/gi) ?? []).length;
-      blocked += (css.match(/@import\s+(url\()?\s*["']?\s*https?:/gi) ?? []).length;
+      counted += css.length;
+      if (counted > MAX_ADAPT_CHARS) blocked = Math.max(blocked, 1);
+      else {
+        blocked += (css.match(/url\(\s*(?:["']\s*)?https?:/gi) ?? []).length;
+        blocked += (css.match(/@import\s+(?:url\(\s*)?(?:["']\s*)?https?:/gi) ?? []).length;
+      }
     }
     style.textContent = css
       .replace(/\(\s*prefers-color-scheme\s*:\s*dark\s*\)/gi, onDark)

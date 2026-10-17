@@ -25,7 +25,7 @@ import {
 } from "./color";
 
 /** Past these sizes an email keeps the light card rather than risk a slow render. */
-const MAX_ADAPT_CHARS = 1_500_000;
+export const MAX_ADAPT_CHARS = 1_500_000;
 const MAX_ADAPT_ELEMENTS = 20_000;
 const MAX_VALUE = 4_000;
 const MAX_SELECTORS = 3_000;
