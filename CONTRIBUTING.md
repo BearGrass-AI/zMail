@@ -10,7 +10,7 @@ If it's a security problem (anything that could leak mail, tokens or keys), don'
 
 ## Getting set up
 
-You need macOS 13.3 or later on Apple silicon, Node with pnpm, a Rust toolchain and Xcode's command line tools.
+You need macOS 26 or later on Apple silicon, Node with pnpm, a Rust toolchain and Xcode's command line tools.
 
 ```sh
 pnpm install

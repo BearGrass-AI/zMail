@@ -31,7 +31,7 @@ function Chip({ email, att }: { email: Email; att: Attachment }) {
         try {
           await openPath(path);
         } catch (err) {
-          // Apps, scripts and installers are shown in Finder rather than run on a click.
+          // Anything but documents, pictures and media is shown in Finder rather than opened on a click.
           if ((err instanceof Error ? err.message : String(err)) !== RISKY_MESSAGE) throw err;
           await revealPath(path);
           toast(`Showed ${att.filename} in Finder`, { description: RISKY_MESSAGE });

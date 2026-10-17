@@ -7,7 +7,7 @@ fn main() {
 }
 
 /// llama.cpp's Metal code guards newer APIs with `@available`. When the deployment target is older
-/// than those APIs (release builds target macOS 13.3), clang turns each guard into a call to
+/// than those APIs (release builds with an older deployment target), clang turns each guard into a call to
 /// `__isPlatformVersionAtLeast` from its own runtime library, which rustc's link line leaves out.
 /// Linking that archive lets the linker take just the version check from it.
 fn link_clang_runtime() {
