@@ -166,7 +166,7 @@ export function AppearancePage() {
           />
         </Row>
         {contactsNote && <div className="px-4 pb-2.5 text-[11.5px] leading-snug text-foreground/45">{contactsNote}</div>}
-        <Row label="Show sender logos" hint="Looks up each sender company's logo once, from its own domain, and keeps it on this Mac. Never for personal addresses, your own organization, or mail in Junk.">
+        <Row label="Show sender logos" hint="For well-known companies, and senders whose images you always load. Looked up once from the company's own domain and kept on this Mac. Never for personal addresses, your own organization, or mail in Junk.">
           <Switch checked={s.senderLogos} onCheckedChange={(on) => s.set({ senderLogos: on })} aria-label="Show sender logos" />
         </Row>
       </Group>
