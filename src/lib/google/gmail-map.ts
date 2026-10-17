@@ -4,6 +4,7 @@
 import type { Attachment, Contact, Email, Folder } from "@/lib/types";
 import type { InlineImage } from "@/lib/signature";
 import { parseListUnsubscribe } from "@/lib/mail/unsubscribe";
+import { clipText } from "@/lib/mail/clip-text";
 
 // ---- API shapes (subset) ---------------------------------------------------------
 
@@ -242,7 +243,7 @@ export function messageToEmail(accountId: string, m: GMessage, userLabelFolder: 
     cc: parseAddressList(rawHeader(m.payload, "Cc")),
     bcc: parseAddressList(rawHeader(m.payload, "Bcc")),
     subject: header(m.payload, "Subject") ?? "(no subject)",
-    snippet: decodeEntities(m.snippet ?? plain.slice(0, 140)),
+    snippet: decodeEntities(m.snippet ?? clipText(plain, 140)),
     text: plain,
     html: html || undefined,
     date,

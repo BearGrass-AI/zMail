@@ -104,7 +104,9 @@ pub struct CachedMessage {
 }
 
 /// Upsert rows. A slim row (`bodyTrimmed`, e.g. the store writing back a flag change on a
-/// listed email) keeps the stored row's full `html` and `text` instead of overwriting them.
+/// listed email) keeps the stored row's full `html` and `text` instead of overwriting them,
+/// and is never inserted as a new row: its capped text isn't the email, so an email the cache
+/// doesn't hold yet waits for a full row from the provider.
 pub fn put_messages_conn(
     conn: &mut Connection,
     account_id: &str,
@@ -114,7 +116,10 @@ pub fn put_messages_conn(
     {
         let mut stmt = tx
             .prepare(
-                "INSERT INTO messages(id, account_id, folder_id, date, json) VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO messages(id, account_id, folder_id, date, json)
+                 SELECT ?1, ?2, ?3, ?4, ?5
+                 WHERE NOT CASE WHEN json_valid(?5) THEN coalesce(json_extract(?5, '$.bodyTrimmed'), 0) ELSE 0 END
+                    OR EXISTS (SELECT 1 FROM messages WHERE id = ?1)
                  ON CONFLICT(id) DO UPDATE SET folder_id = excluded.folder_id, date = excluded.date, json =
                    CASE WHEN coalesce(json_extract(excluded.json, '$.bodyTrimmed'), 0) AND NOT coalesce(json_extract(messages.json, '$.bodyTrimmed'), 0)
                    THEN json_patch(json_remove(excluded.json, '$.bodyTrimmed'), json_object(
@@ -135,6 +140,20 @@ pub fn put_messages_conn(
 /// the full row comes from `get_message_conn` when an email is opened.
 const SLIM_JSON: &str = "json_set(json_remove(json, '$.html'), '$.text', coalesce(substr(json_extract(json, '$.text'), 1, 8000), ''), '$.bodyTrimmed', json('true'))";
 
+/// A text column read lossily (`None` for NULL, numbers as their digits). A cached email whose
+/// JSON holds half a surrogate pair (`\ud83d`) comes out of SQLite's JSON functions as bytes
+/// that aren't UTF-8; a strict read would fail the whole query on that one row, so it gets
+/// U+FFFD in their place instead.
+pub fn lossy_text(r: &rusqlite::Row, i: usize) -> rusqlite::Result<Option<String>> {
+    use rusqlite::types::ValueRef;
+    Ok(match r.get_ref(i)? {
+        ValueRef::Null => None,
+        ValueRef::Text(b) | ValueRef::Blob(b) => Some(String::from_utf8_lossy(b).into_owned()),
+        ValueRef::Integer(n) => Some(n.to_string()),
+        ValueRef::Real(x) => Some(x.to_string()),
+    })
+}
+
 /// Newest `limit` rows for the account; with `folders`, also every row in those folders
 /// (so a whole Inbox survives the limit). Deduplicated by id, newest first. Rows are slim
 /// (see `SLIM_JSON`).
@@ -149,7 +168,7 @@ pub fn list_messages_conn(
             id: r.get(0)?,
             folder_id: r.get(1)?,
             date: r.get(2)?,
-            json: r.get(3)?,
+            json: lossy_text(r, 3)?.unwrap_or_default(),
         })
     };
     let mut stmt = conn
@@ -870,7 +889,7 @@ pub fn get_rows_conn(conn: &Connection, ids: &[String]) -> Result<Vec<CachedMess
                 id: r.get(0)?,
                 folder_id: r.get(1)?,
                 date: r.get(2)?,
-                json: r.get(3)?,
+                json: lossy_text(r, 3)?.unwrap_or_default(),
             })
         })
         .map_err(err)?
@@ -1165,6 +1184,74 @@ mod tests {
             serde_json::from_str(&get_message_conn(&conn, "1").unwrap().unwrap().json).unwrap();
         assert!(v.get("html").is_none());
         assert_eq!(v["text"], "new");
+    }
+
+    #[test]
+    fn a_slim_row_is_never_inserted_fresh() {
+        let mut conn = mem();
+        let row = |json: &str| CachedMessage {
+            id: "1".into(),
+            folder_id: "inbox".into(),
+            date: "2026-10-01".into(),
+            json: json.into(),
+        };
+        // The store writes back a slim row for an email the cache doesn't hold yet (a backfilled
+        // email that wasn't cached, say): its capped text must not become the cached copy.
+        let slim =
+            serde_json::json!({ "id": "1", "unread": false, "text": "cut", "bodyTrimmed": true })
+                .to_string();
+        put_messages_conn(&mut conn, "acct", &[row(&slim)]).unwrap();
+        assert!(get_message_conn(&conn, "1").unwrap().is_none());
+        assert!(list_ids_conn(&conn, "acct", 10, None).unwrap().is_empty());
+        // Once the full row is cached, a slim write still updates it and keeps the body.
+        let full = serde_json::json!({ "id": "1", "unread": true, "text": "whole", "html": "<p>whole</p>" })
+            .to_string();
+        put_messages_conn(&mut conn, "acct", &[row(&full)]).unwrap();
+        put_messages_conn(&mut conn, "acct", &[row(&slim)]).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&get_message_conn(&conn, "1").unwrap().unwrap().json).unwrap();
+        assert_eq!(v["unread"], serde_json::Value::Bool(false));
+        assert_eq!(v["text"], "whole");
+        assert_eq!(v["html"], "<p>whole</p>");
+    }
+
+    #[test]
+    fn a_lone_surrogate_in_cached_text_fails_no_query() {
+        let mut conn = mem();
+        // Half an emoji, as JSON.stringify writes it. SQLite's JSON functions decode the escape
+        // to bytes that aren't UTF-8, so a strict String read of the slim row fails.
+        let bad = r#"{"id":"bad","subject":"Cut","text":"half \ud83d"}"#;
+        let good =
+            serde_json::json!({ "id": "good", "subject": "Fine", "text": "whole" }).to_string();
+        let row = |id: &str, date: &str, json: &str| CachedMessage {
+            id: id.into(),
+            folder_id: "inbox".into(),
+            date: date.into(),
+            json: json.into(),
+        };
+        put_messages_conn(
+            &mut conn,
+            "acct",
+            &[
+                row("bad", "2026-10-02", bad),
+                row("good", "2026-10-01", &good),
+            ],
+        )
+        .unwrap();
+        let inbox = ["inbox".to_string()];
+        // Both listing queries, and the search's rows by id.
+        for (limit, folders) in [(10, None), (0, Some(&inbox[..]))] {
+            let rows = list_messages_conn(&conn, "acct", limit, folders).unwrap();
+            assert_eq!(
+                rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+                ["bad", "good"]
+            );
+            let v: serde_json::Value = serde_json::from_str(&rows[0].json).unwrap();
+            assert_eq!(v["subject"], "Cut");
+            assert!(v["text"].as_str().unwrap().starts_with("half "));
+        }
+        let rows = get_rows_conn(&conn, &["bad".to_string(), "good".to_string()]).unwrap();
+        assert_eq!(rows, list_messages_conn(&conn, "acct", 10, None).unwrap());
     }
 
     #[test]

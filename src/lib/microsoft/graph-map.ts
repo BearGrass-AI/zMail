@@ -2,6 +2,7 @@
 
 import type { Attachment, CalEvent, CalendarInfo, Contact, Email, Folder, SystemFolder } from "@/lib/types";
 import { parseListUnsubscribe } from "@/lib/mail/unsubscribe";
+import { clipText } from "@/lib/mail/clip-text";
 
 // ---- API shapes (subset) ---------------------------------------------------------
 
@@ -136,7 +137,7 @@ export function messageToEmail(accountId: string, m: GMsg, attachments: GAttachm
     cc: (m.ccRecipients ?? []).map(contact),
     bcc: (m.bccRecipients ?? []).map(contact),
     subject: m.subject || "(no subject)",
-    snippet: (m.bodyPreview ?? text).slice(0, 160),
+    snippet: clipText(m.bodyPreview ?? text, 160),
     text,
     html,
     date: m.receivedDateTime,
