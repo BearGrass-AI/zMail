@@ -116,6 +116,39 @@ describe("repliedIds", () => {
     ]);
     expect(repliedIds(s)).toEqual(["asked"]);
   });
+
+  // The From header is the sender's to write: only mail the provider filed as sent counts as your reply.
+  it("ignores a newer message that claims to be from you but wasn't sent from your account", () => {
+    const spoof = { name: "Z", address: "z@gmail.com" };
+    const s = base([
+      row("asked", { threadId: "t1", date: t(3) }),
+      row("spoof-inbox", { threadId: "t1", date: t(1), from: spoof }),
+      row("asked2", { threadId: "t2", date: t(3) }),
+      row("spoof-spam", { threadId: "t2", date: t(1), folderId: "g:SPAM", labels: ["SPAM"], from: spoof }),
+    ]);
+    expect(repliedIds(s)).toEqual([]);
+  });
+
+  it("counts a Gmail reply by its SENT label even when it's filed under another label", () => {
+    const s = base([row("asked", { threadId: "t1", date: t(3) }), row("mine", { threadId: "t1", date: t(1), folderId: "g:Label_1", labels: ["SENT", "Label_1"], from: { name: "Z", address: "z@gmail.com" } })]);
+    expect(repliedIds(s)).toEqual(["asked"]);
+  });
+
+  it("does not trust a SENT label on an Outlook message (categories come from mail)", () => {
+    const outlook = { id: "o", kind: "m365" as const, name: "Outlook", address: "z@example.org" };
+    const of: Folder[] = [...folders, { id: "o:INBOX", accountId: "o", name: "Inbox", system: "inbox" }, { id: "o:SENT", accountId: "o", name: "Sent Items", system: "sent" }];
+    const me = { name: "Z", address: "z@example.org" };
+    const s = base(
+      [
+        row("asked", { accountId: "o", threadId: "t1", folderId: "o:INBOX", date: t(3) }),
+        row("fake", { accountId: "o", threadId: "t1", folderId: "o:INBOX", labels: ["SENT"], date: t(1), from: me }),
+        row("asked2", { accountId: "o", threadId: "t2", folderId: "o:INBOX", date: t(3) }),
+        row("mine", { accountId: "o", threadId: "t2", folderId: "o:SENT", labels: [], date: t(1), from: me }),
+      ],
+      { folders: of, accounts: [gmail, outlook] },
+    );
+    expect(repliedIds(s)).toEqual(["asked2"]);
+  });
 });
 
 beforeEach(async () => {

@@ -141,11 +141,17 @@ export function ageOutIds(s: NeedsSel & Pick<MailState, "emails" | "dateFinds">,
 
 /**
  * Needs-you mail you have since replied to from anywhere: its thread's newest message (in any
- * folder the store holds but Drafts) is from one of your own addresses and came after it.
+ * folder the store holds but Drafts) is one you sent and came after it. Sent means the provider
+ * filed it as sent (the Sent folder, or Gmail's SENT label), not just a From header naming you,
+ * which any sender can write.
  */
 export function repliedIds(s: NeedsSel & Pick<MailState, "emails" | "accounts">): string[] {
   // Your addresses, as ownAddresses (notifications) has them.
   const own = new Set(s.accounts.map((a) => a.address.toLowerCase()));
+  const sentFolders = new Set(s.folders.filter((f) => f.system === "sent").map((f) => f.id));
+  // Only Gmail sets SENT itself; Outlook labels are categories, which incoming mail can carry.
+  const gmail = new Set(s.accounts.filter((a) => a.kind === "gmail").map((a) => a.id));
+  const sentByYou = (e: Email) => own.has(e.from.address.toLowerCase()) && (sentFolders.has(e.folderId) || (gmail.has(e.accountId) && e.labels.includes("SENT")));
   const drafts = new Set(s.folders.filter((f) => f.system === "drafts").map((f) => f.id));
   const thread = (e: Email) => `${e.accountId}\u0000${e.threadId}`;
   const newest = new Map<string, { e: Email; at: number }>();
@@ -158,7 +164,7 @@ export function repliedIds(s: NeedsSel & Pick<MailState, "emails" | "accounts">)
   const out: string[] = [];
   for (const e of s.emails) {
     const n = newest.get(thread(e));
-    if (!n || n.e.id === e.id || !own.has(n.e.from.address.toLowerCase()) || !(n.at > Date.parse(e.date))) continue;
+    if (!n || n.e.id === e.id || !sentByYou(n.e) || !(n.at > Date.parse(e.date))) continue;
     if (isInbox(s, e) && inNeedsYou(s, e)) out.push(e.id);
   }
   return out;
