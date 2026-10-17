@@ -20,20 +20,69 @@ It works with Outlook / Microsoft 365 and Gmail, and it's built with Tauri 2 (Ru
 
 <sub>Screenshots use the built-in demo mailbox.</sub>
 
-## Two models, two jobs
+## How it works
 
-Sorting and writing are different problems, so zMail uses a different model for each.
+Most "AI email" apps send every message to a chat model and ask it what to do. That's slow, it's expensive at inbox scale, and you get back a paragraph you then have to parse. zMail splits the work across three kinds of model, each doing the one thing it's good at.
 
-- **Sorting** goes to a *decision model* like [Jev](https://typesafe.ai), or Clef running in Ollama. It answers a fixed set of questions about each email (which lane, what kind of mail, how urgent, does it want a reply, which folder) and returns probabilities rather than prose. It's fast and cheap enough to run on every message.
-- **Writing** goes to a regular LLM (Anthropic, OpenAI, Ollama, or anything OpenAI-compatible). It writes summaries and drafts, and powers the assistant.
+```mermaid
+flowchart LR
+    mail[New mail] --> decide["Decision model<br/>(Jev or Clef)"]
+    decide -->|lane, kind, urgency, folder| inbox[Today and Triage]
+    you[Your corrections] -.->|examples per sender| decide
+    mail --> embed["Embedding model<br/>(on your Mac)"]
+    embed --> index[(Vector index)]
+    index --> search[Search and the assistant]
+    write["Writing model<br/>(Claude, GPT, Ollama...)"] --> search
+    write --> drafts[Drafts and summaries]
+```
 
-When you move an email to another lane or fix its kind, zMail remembers it and shows the decision model those examples the next time that sender writes. It also re-sorts the rest of that sender's inbox right away. Rules are there when you want a guarantee rather than a hint.
+### Sorting: a decision model, not a chatbot
+
+Sorting is a judgment call with a fixed set of possible answers, which is exactly what decision models like [Jev](https://typesafe.ai) (or the open Clef, which you can run in Ollama) are built for. Instead of a prompt asking for prose, zMail sends each email along with a handful of typed questions:
+
+- **bucket** (choose one): needs you, worth a skim, or ready to archive
+- **category** (choose one): a person writing to you, transactions, updates, promotions, social, newsletters or security
+- **urgency** (a 4-step score): from "not time-sensitive" to "needs attention within the hour"
+- **needs_reply** (yes or no)
+- **folder** (choose one): one of your own folders, or "stay in the inbox". This is only asked when you have folders.
+- **section** (choose one): one of the sections you've defined, if any
+
+Each option comes with a plain-English description of what counts, so you can see exactly what the model was told in [`src/lib/ai/triage.ts`](src/lib/ai/triage.ts). Answers come back as probabilities, not text:
+
+```json
+"bucket": {
+  "choice": "worth_skim",
+  "confidence": 0.71,
+  "probabilities": { "needs_you": 0.12, "worth_skim": 0.71, "ready_archive": 0.17 }
+}
+```
+
+That has a few nice side effects. There's nothing to parse and nothing to go off-script, and it's quick and cheap enough to run on every message. zMail can also tell a confident answer from a coin flip. And the answers can be checked against each other: if the model calls something a promotion but also says it needs you, its own category wins and the email goes to Can go.
+
+**It learns from you, per sender.** When you drag an email to another lane, or tell zMail it's a newsletter, it saves the sender, the subject and your choice. The next time that sender's mail is sorted, the decision model sees those as examples ("the user moved *Your statement is ready* to Worth a skim"), along with where you've filed that sender's mail before. It's told to follow your lead for similar emails but judge different ones on their own, so one bank can send statements you care about and promos you don't. zMail then re-sorts that sender's other recent inbox mail right away, so you see the effect. If you want a guarantee rather than a hint, add a rule.
+
+### Search: an embedding model that runs on your Mac
+
+Keyword search is great for exact names and numbers and useless for "that email about moving the budget meeting" when the email actually said "can we push Thursday's finance sync." So zMail can also search by meaning.
+
+It's off until you turn it on in Settings → AI Assistant. Then zMail downloads [EmbeddingGemma 2](https://huggingface.co/ggml-org/embeddinggemma-2-GGUF) once (about 310 MB, pinned to an exact revision and checked against a SHA-256) and runs it locally through llama.cpp on the GPU. Your mail never leaves the Mac for this.
+
+- **Indexing** happens in the background, newest mail first. Each email becomes one 256-number vector built from its subject, sender and its own words, with quoted replies and tracking links stripped out. Longer emails also get up to 12 passage vectors, about 300 characters each, so a single relevant paragraph can be found inside a long thread.
+- **Searching** runs your query through the same model and compares it against every email vector in memory. It's a plain brute-force scan, which is fast enough at mailbox scale. Those results are merged with SQLite's full-text keyword search using reciprocal rank fusion, so exact names and numbers stay findable while paraphrases surface as Best matches above the regular results.
+- **Junk stays out.** Every query has nearest neighbours, even one about nothing in your mailbox. A result found only by meaning has to clear a similarity threshold, which I tuned so related query/email pairs pass and unrelated ones don't.
+- **The assistant uses the passages.** When you ask it a question about your mail, it gets the five best-matching emails with the paragraph that answers the question, instead of reading whole emails. On the test fixture that's about 1,800 characters of context instead of 15,800.
+
+The model is unloaded after a few idle minutes, so it only uses memory while it's working. Turning it off lets you delete both the index and the model.
+
+### Writing: a regular LLM
+
+Drafting replies, summaries and running the assistant need a real language model, so that part goes to whichever one you connect: Claude, GPT, a local model in Ollama, or anything OpenAI-compatible. The assistant's actions show a confirm card before anything is sent, and the ones that move mail can be undone.
 
 ## What's in it
 
 - **Today, Triage and a classic three-pane inbox.** Triage is a board: drag cards between lanes, shift-click to select a run, archive a whole lane at once.
 - **The assistant** can search your mail, act on it (with Undo), draft and send replies after you confirm, read your calendar, RSVP, look people up, and change settings. Type `@` and a name to point it at someone.
-- **Search by meaning.** Optional and fully local: turn it on in Settings → AI Assistant and zMail downloads a ~300 MB embedding model once, then indexes your mail in the background.
+- **Search by meaning**, alongside regular keyword search (see above).
 - **Scheduled send, snooze, automatic replies, signatures, attachments.** Scheduled mail is sent by zMail itself, so the app has to be open. Anything overdue goes out at the next launch.
 - **Calendar** with Teams, Meet and Zoom meeting creation, and drive times from Apple Maps.
 - **Notifications** for new mail that needs you, with quiet hours and a dock badge.
