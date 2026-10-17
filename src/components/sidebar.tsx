@@ -9,7 +9,6 @@ import {
   Inbox,
   PenLine,
   Search,
-  Settings,
   Sparkles,
   Star,
   Sun,
@@ -21,6 +20,7 @@ import { searchAskAction } from "@/lib/ai/assistant/search-ask";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { FolderTrees } from "./folder-tree";
+import { SidebarFooter } from "./sidebar-footer";
 import { useEffect, useRef, useState } from "react";
 import { Clock, Plane } from "lucide-react";
 import { toast } from "sonner";
@@ -315,11 +315,7 @@ export function Sidebar({ onSettings }: { onSettings: () => void }) {
         {viewKind !== "calendar" && <FolderTrees onSettings={onSettings} />}
       </nav>
 
-      <div className="flex items-center justify-end border-t border-hairline px-3 py-2.5 text-foreground/45">
-        <button onClick={onSettings} className="rounded p-1 hover:bg-foreground/[0.07]" aria-label="Settings">
-          <Settings className="size-3.5" />
-        </button>
-      </div>
+      <SidebarFooter onSettings={onSettings} />
     </aside>
   );
 }
