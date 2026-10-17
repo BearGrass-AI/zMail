@@ -5,7 +5,7 @@
 <h1 align="center">zMail</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/macOS-13.3%2B-4A86F2?style=flat-square&labelColor=0D1117" alt="macOS 13.3+" />
+  <img src="https://img.shields.io/badge/macOS-26%2B-4A86F2?style=flat-square&labelColor=0D1117" alt="macOS 26+" />
   <img src="https://img.shields.io/badge/Apple-silicon-4A86F2?style=flat-square&labelColor=0D1117" alt="Apple silicon" />
   <img src="https://img.shields.io/badge/Tauri-2-4A86F2?style=flat-square&labelColor=0D1117" alt="Tauri 2" />
   <img src="https://img.shields.io/badge/license-MIT-4A86F2?style=flat-square&labelColor=0D1117" alt="MIT license" />

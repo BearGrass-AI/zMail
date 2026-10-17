@@ -36,6 +36,21 @@ fn clean_query(q: &str) -> Result<String, String> {
     Ok(q.to_string())
 }
 
+/// An address on one line, as MapKit's placemark title gave it: a full address may put the
+/// street, the city and the country on lines of their own.
+#[cfg_attr(
+    all(not(target_os = "macos"), not(test)),
+    expect(dead_code, reason = "only MapKit's addresses need it")
+)]
+fn one_line(address: &str) -> String {
+    address
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[cfg(target_os = "macos")]
 mod imp {
     use super::{Eta, Place};
@@ -44,8 +59,8 @@ mod imp {
     use objc2::rc::Retained;
     use objc2_foundation::{NSDate, NSError, NSString};
     use objc2_map_kit::{
-        MKAnnotation, MKDirections, MKDirectionsRequest, MKDirectionsTransportType, MKETAResponse,
-        MKErrorCode, MKLocalSearch, MKLocalSearchRequest, MKLocalSearchResponse, MKMapItem,
+        MKDirections, MKDirectionsRequest, MKDirectionsTransportType, MKETAResponse, MKErrorCode,
+        MKLocalSearch, MKLocalSearchRequest, MKLocalSearchResponse, MKMapItem,
     };
     use std::cell::RefCell;
     use std::sync::mpsc;
@@ -202,16 +217,12 @@ mod imp {
         unsafe { directions.calculateETAWithCompletionHandler(RcBlock::as_ptr(&block)) };
     }
 
-    #[expect(
-        deprecated,
-        reason = "`placemark` is deprecated in macOS 26 for `address`, which older macOS lacks"
-    )]
     fn place(item: &MKMapItem, query: &str) -> Place {
         // SAFETY: property reads on a map item MapKit returned.
         let name = unsafe { item.name() }.map_or_else(|| query.to_string(), |s| s.to_string());
-        // SAFETY: as above.
-        let address = unsafe { item.placemark().title() }
-            .map(|s| s.to_string())
+        // SAFETY: as above, then a property read on the address MapKit returned with it.
+        let address = unsafe { item.address().map(|a| a.fullAddress().to_string()) }
+            .map(|a| super::one_line(&a))
             .filter(|a| !a.is_empty() && *a != name);
         Place { name, address }
     }
@@ -266,6 +277,23 @@ mod tests {
             clean_query("Main\u{0}St"),
             Err("place has control characters".into())
         );
+    }
+
+    #[test]
+    fn maps_addresses_read_on_one_line() {
+        assert_eq!(
+            one_line("12 Example Ave\nExampleton, EX 00000\nExampleland"),
+            "12 Example Ave, Exampleton, EX 00000, Exampleland"
+        );
+        assert_eq!(
+            one_line("12 Example Ave, Exampleton"),
+            "12 Example Ave, Exampleton"
+        );
+        assert_eq!(
+            one_line(" 12 Example Ave \r\n\n Exampleton "),
+            "12 Example Ave, Exampleton"
+        );
+        assert_eq!(one_line(" \n "), "");
     }
 
     #[test]
