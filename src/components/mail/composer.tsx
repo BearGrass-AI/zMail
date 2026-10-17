@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { draftRequest } from "@/lib/ai/assistant/draft-request";
 import { useAssistant } from "@/lib/ai/assistant/state";
 import { ask as askAssistant } from "@/lib/ai/assistant/loop";
+import { expectRedraft } from "@/lib/ai/assistant/redraft";
 import { htmlToText, inlineDataImages, sanitizeSignature, sizeSignatureImages, withoutRemoteLoads } from "@/lib/signature";
 import { openExternal } from "./email-body";
 import { Clock } from "lucide-react";
@@ -50,6 +51,8 @@ type SavedDraft = { id?: string; acct?: string };
 
 /** What the user could lose by closing: the fields plus the attached files. */
 const snapshot = (d: Doc, fs: { filename: string; size: number }[]) => JSON.stringify([d.to, d.cc, d.bcc, d.subject, d.body, fs.map((f) => [f.filename, f.size])]);
+/** What a scheduled email would send: its fields and files, From account and signature. */
+const sentAs = (snap: string | null, from: string | undefined, sig: string | null) => JSON.stringify([snap, from ?? null, sig]);
 
 const attachOnly =(f: OutgoingAttachment & { size: number }): FileEntry => ({
   ...f,
@@ -162,6 +165,11 @@ export function Composer() {
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
   const [baseline, setBaseline] = useState<string | null>(first.baseline);
+  // A reopened scheduled email: what it was scheduled to send. Saved with changes, it leaves the schedule.
+  const scheduledFor = (c: Compose, opened: string | null) => (c.scheduledAt !== undefined && c.draft ? sentAs(opened, defaultFrom, sigDefault) : null);
+  const [scheduledAs, setScheduledAs] = useState(() => scheduledFor(compose, first.baseline));
+  const stillScheduled = useMail((s) => !!compose.draft && s.scheduled.some((r) => r.draftId === compose.draft?.id));
+  const withdrawScheduled = useMail((s) => s.withdrawScheduled);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the saved-draft identity per compose session with the other reset effects; left as an effect so save/send timing stays the same
     setDraftId(compose.draft?.id);
@@ -184,12 +192,11 @@ export function Composer() {
     setFiles((compose.attachments ?? []).map(attachOnly));
     setDoc(next.doc);
     setBaseline(next.baseline);
+    setScheduledAs(scheduledFor(compose, next.baseline));
     setAsking(false);
   }
 
   const drafting = useRef(false);
-  /** The session a redraft was asked for: its edit_draft result gets an Undo. */
-  const redraftFor = useRef<number | null>(null);
   const generate = async () => {
     // Enter in the prompt and the button can both land before the re-render that disables it.
     if (drafting.current || (!ask.trim() && !replyTo && !(doc && asking))) return;
@@ -228,9 +235,10 @@ export function Composer() {
         setAsk("");
         setMentions([]);
         setAsking(false);
-        redraftFor.current = session;
+        // The rewrite the user asked for goes straight into this message (with Undo); other changes need a card.
+        const done = expectRedraft(session);
         a.toggle(true);
-        void askAssistant(req.text, undefined, undefined, { display: req.display });
+        void askAssistant(req.text, undefined, undefined, { display: req.display }).finally(done);
         return;
       }
       a.setPendingFrom(fromId ?? null);
@@ -328,6 +336,8 @@ export function Composer() {
     !!doc &&
     snapshot(doc, files) !== baseline &&
     (!!draftId || !!(doc.to.trim() || doc.cc.trim() || doc.bcc.trim() || doc.subject.trim() || !bodyIsEmpty(doc.body) || files.length));
+  // A reopened scheduled email that no longer matches what was scheduled: saving it takes it off the schedule.
+  const changesSchedule = !!live && !!doc && scheduledAs !== null && stillScheduled && sentAs(snapshot(doc, files), fromId, sigId) !== scheduledAs;
   // Re-sent for each session too: closing one clears the store's flag, and the next may be just as unsaved.
   useEffect(() => setComposeDirty(dirty), [dirty, live, setComposeDirty]);
   useEffect(() => () => setComposeDirty(false), [setComposeDirty]);
@@ -348,12 +358,21 @@ export function Composer() {
     lastEditSeq.current = editSeq;
     // An edit made for another session (say the user switched drafts while the assistant downloaded files) is dropped.
     if (!edit || !doc || edit.session !== session) return;
-    if (redraftFor.current === session && (edit.body !== undefined || edit.subject !== undefined)) {
-      // The redraft replaced what the user wrote: Undo puts their text back.
-      redraftFor.current = null;
-      const undo = { ...(edit.subject !== undefined && { subject: doc.subject }), ...(edit.body !== undefined && { body: doc.body }) };
-      toast("Redrafted with AI", { action: { label: "Undo", onClick: () => ours(session) && setDoc((d) => d && { ...d, ...undo }) } });
-    }
+    // Undo puts back what the assistant replaced or added.
+    const undo: Partial<Doc> = {};
+    for (const k of ["subject", "body", "to", "cc", "bcc"] as const) if (edit[k] !== undefined) undo[k] = doc[k];
+    const added = (edit.addFiles ?? []).map(attachOnly);
+    const addedIds = new Set(added.map((f) => f.id));
+    toast(edit.redraft ? "Redrafted with AI" : "The assistant changed the draft", {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          if (!ours(session)) return;
+          setDoc((d) => d && { ...d, ...undo });
+          if (addedIds.size) setFiles((prev) => prev.filter((f) => !addedIds.has(f.id)));
+        },
+      },
+    });
     // eslint-disable-next-line react-hooks/set-state-in-effect -- applies the assistant's one-shot composeEdit command (once per seq), not state derivable from props
     setDoc({
       ...doc,
@@ -365,7 +384,7 @@ export function Composer() {
     });
     if (edit.cc?.trim()) setShowCc(true);
     if (edit.bcc?.trim()) setShowBcc(true);
-    if (edit.addFiles?.length) setFiles((prev) => [...prev, ...edit.addFiles!.map(attachOnly)]);
+    if (added.length) setFiles((prev) => [...prev, ...added]);
   }, [editSeq, doc, session]);
 
   const saveInFlight = useRef(false);
@@ -382,10 +401,14 @@ export function Composer() {
     const mine = session;
     const draft = draftRef.current;
     const saved = snapshot(doc, files);
+    const unschedule = changesSchedule ? compose.draft?.id : undefined;
+    let putBack: (() => void) | null = null;
     let result: SavedDraft | undefined;
     let done!: (d: SavedDraft | undefined) => void;
     savePromise.current = { session: mine, done: new Promise((r) => (done = r)) };
     try {
+      // Off the schedule before the save: by itself, a scheduled email only ever sends what the user scheduled.
+      if (unschedule) putBack = await withdrawScheduled(unschedule);
       const msg = await buildRequest(doc);
       const res = await saveDraftAction(from.id, msg, await usableDraft(from.id, draft, mine));
       result = { id: res.draftId, acct: from.id };
@@ -397,9 +420,11 @@ export function Composer() {
         setSavedAt(new Date());
         setBaseline(saved);
       }
-      if (fromClose) toast("Draft saved");
+      if (putBack) toast("Saved, and no longer scheduled", { description: "It changed after you scheduled it. It's in Drafts: schedule it again to send it later." });
+      else if (fromClose) toast("Draft saved");
       return true;
     } catch (err) {
+      putBack?.();
       toast.error("Couldn't save the draft", { description: err instanceof Error ? err.message : String(err) });
       return false;
     } finally {
@@ -546,7 +571,9 @@ export function Composer() {
       </header>
       {closeAsk && doc && (
         <div role="alert" className="flex items-center gap-2 border-b border-hairline bg-primary/[0.06] px-6 py-2 text-[13px]">
-          <span className="mr-auto font-medium">Save this draft?</span>
+          <span className="mr-auto font-medium">
+            Save this draft?{changesSchedule && <span className="font-normal text-foreground/60"> Saving takes it off the schedule.</span>}
+          </span>
           <button
             onClick={() => void answer("save")}
             disabled={saving}

@@ -156,6 +156,9 @@ describe("Redraft with AI", () => {
   it("keeps the text, sends it to be reworked, and Undo brings it back", async () => {
     await openDirty();
     const mine = useMail.getState().compose;
+    // The assistant's turn runs until the test ends it.
+    let endTurn!: () => void;
+    ask.mockImplementationOnce(() => new Promise<void>((r) => (endTurn = r)));
     await act(async () => buttonText("Redraft with AI")!.click());
     // Still unsaved while asking: closing would ask.
     expect(useMail.getState().composeDirty).toBe(true);
@@ -172,9 +175,18 @@ describe("Redraft with AI", () => {
     expect(editor().innerHTML).toContain("My own words");
     expect(useMail.getState().composeDirty).toBe(true);
 
-    // The assistant rewrites the body in place.
-    await act(async () => useMail.getState().editCompose({ body: "Brand new words" }));
+    // The assistant rewrites the body in place: the user asked for it, so there's no card.
+    await act(() => new Promise((r) => setTimeout(r, 300)));
+    const r = await executeTool({ id: "c1", name: "edit_draft", args: { body: "Brand new words" } }, realDeps());
+    expect(r.content).toMatchObject({ status: "edited" });
+    await act(async () => {});
     expect(editor().innerHTML).toContain("Brand new words");
+    // Once the turn is over, the assistant's edits need a card again.
+    await act(async () => endTurn());
+    const again = await executeTool({ id: "c2", name: "edit_draft", args: { body: "Sneaky words" } }, realDeps());
+    expect(again.content).toMatchObject({ status: "awaiting_confirmation" });
+    await act(async () => {});
+    expect(editor().innerHTML).not.toContain("Sneaky words");
     const undo = toasts.find((t) => t.text === "Redrafted with AI")?.opts?.action;
     expect(undo?.label).toBe("Undo");
     await act(async () => undo!.onClick());

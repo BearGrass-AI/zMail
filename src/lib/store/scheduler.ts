@@ -100,7 +100,7 @@ export function startScheduler() {
 export function scheduledActions(
   set: StoreApi<MailState>["setState"],
   get: StoreApi<MailState>["getState"],
-): Pick<MailState, "scheduleMessage" | "cancelScheduled" | "sendScheduledNow" | "editScheduled" | "runDueScheduled"> {
+): Pick<MailState, "scheduleMessage" | "cancelScheduled" | "sendScheduledNow" | "editScheduled" | "withdrawScheduled" | "runDueScheduled"> {
   return {
     async scheduleMessage(accountId, msg, sendAt, draft) {
       if (!validSendAt(sendAt, Date.now())) throw new Error("Pick a time at least a minute from now");
@@ -198,6 +198,26 @@ export function scheduledActions(
       const opened = await get().openDraft(r.messageId, { scheduledAt: r.sendAt, draftId: r.draftId }).catch(() => false);
       // Not open after all: the scheduler resumes.
       if (!opened) setScheduled((list) => list.map((x) => (x.id === id ? withoutEditing(x) : x)));
+    },
+
+    async withdrawScheduled(draftId) {
+      const r = get().scheduled.find((x) => x.draftId === draftId);
+      if (!r) return null;
+      if (scheduledInFlight.has(r.id)) throw new Error("It's being sent right now.");
+      if (r.server) await providerFor(r.accountId).releaseFromServer?.(r.messageId);
+      // Released from Outlook's hold above, so zMail sends it if it goes back.
+      const back = { ...r, server: false };
+      try {
+        // On disk before the draft is saved: a restart in between can't send the changed draft.
+        await saveScheduled(
+          (list) => list.filter((x) => x.id !== r.id),
+          (list) => (list.some((x) => x.id === r.id) ? list : [...list, back]),
+        );
+      } catch (err) {
+        throw new Error("zMail couldn't take it off the schedule. Nothing was saved.", { cause: err });
+      }
+      // The save failed: the server still holds what was scheduled, so it goes back on the schedule (held while open).
+      return () => setScheduled((list) => (list.some((x) => x.draftId === draftId) ? list : [...list, { ...back, editing: true }]));
     },
 
     runDueScheduled() {

@@ -17,6 +17,7 @@ import { normalizeFrom, type RuleAction } from "@/lib/rules";
 import { unsubMethod } from "@/lib/mail/unsubscribe";
 import { MODULES } from "./modules";
 import { takeDirect } from "./modules/budget";
+import { proposeDraftEdit } from "./modules/people";
 import { localMinute } from "@/lib/dates/local";
 import { FolderPending, resolveFolder } from "./folders";
 
@@ -65,8 +66,6 @@ export interface ToolDeps {
   draft(args: DraftArgs): Promise<Compose>;
   /** Opens it in compose; over an unsaved message the user is asked first and may keep editing ("kept"). */
   openCompose(c: Compose): Promise<ComposeOpened>;
-  /** Replace the open draft's subject and/or body (Markdown). */
-  editCompose(patch: { subject?: string; body?: string }): void;
   defaultCalendar(): string | undefined;
   createEvent(e: NewEvent): Promise<void>;
   toast(text: string, undo?: () => void): void;
@@ -192,7 +191,7 @@ export const CORE_TOOLS: ToolDef[] = [
   },
   {
     name: "edit_draft",
-    description: "Change the draft that is open in compose: replace its subject and/or its whole body (Markdown). Read the current text with current_view first. Never opens a new draft.",
+    description: "Change the draft that is open in compose: replace its subject and/or its whole body (Markdown). The user approves the change on a card unless they asked for it with Redraft. Read the current text with current_view first. Never opens a new draft.",
     parameters: { type: "object", properties: { subject: { type: "string" }, body: { type: "string" } } },
   },
   {
@@ -589,9 +588,8 @@ async function run(name: string, a: Record<string, unknown>, deps: ToolDeps): Pr
       const subject = typeof a.subject === "string" ? a.subject : undefined;
       const body = typeof a.body === "string" ? a.body : undefined;
       if (subject === undefined && body === undefined) throw new Error("edit_draft needs subject or body");
-      deps.editCompose({ subject, body });
-      st.push({ kind: "step", text: "✎ Edited the draft" });
-      return { status: "edited", message: "The open draft was updated." };
+      // A card shows the change; the draft changes when the user approves it.
+      return proposeDraftEdit({ ...(subject !== undefined && { subject }), ...(body !== undefined && { body }) }, deps);
     }
   }
   throw new Error(`unknown tool "${name}"`);
