@@ -1528,10 +1528,10 @@ export const useMail = create<MailState>()((set, get) => {
       });
     },
 
-    setCategory(ids, category) {
+    setCategory(ids, category, opts) {
       set((s) => ({
         categoryOverrides: { ...s.categoryOverrides, ...Object.fromEntries(ids.map((id) => [id, category])) },
-        lessons: learn(s.lessons, s.emails, ids, { category }),
+        lessons: opts?.learn === false ? s.lessons : learn(s.lessons, s.emails, ids, { category }),
       }));
     },
 

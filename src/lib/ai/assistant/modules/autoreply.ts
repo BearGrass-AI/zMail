@@ -175,6 +175,10 @@ export const autoreplyModule: ToolModule = {
 
       const change: Change = enabled && !current.enabled ? "on" : !enabled && current.enabled ? "off" : "update";
       const bodyText = htmlToText(reply.message);
+      // The card shows everything that's saved: all of it when turning on, and otherwise whatever differs from what's stored.
+      const showWhen = enabled || reply.start !== current.start || reply.end !== current.end;
+      const showOutside = enabled || reply.audience !== current.audience || reply.externalMessage !== current.externalMessage;
+      const showBody = enabled || reply.message !== current.message || reply.externalMessage !== current.externalMessage;
       pushConfirmCard({
         module: ID,
         action: "set",
@@ -183,14 +187,10 @@ export const autoreplyModule: ToolModule = {
         preview: {
           fields: [
             { label: "Account", value: a.address },
-            ...(enabled
-              ? [
-                  { label: "When", value: reply.start && reply.end ? `${moment(reply.start)} – ${moment(reply.end)}` : "Until you turn them off" },
-                  { label: "Outside", value: outside(reply) },
-                ]
-              : []),
+            ...(showWhen ? [{ label: "When", value: reply.start && reply.end ? `${moment(reply.start)} – ${moment(reply.end)}` : enabled ? "Until you turn them off" : "No dates" }] : []),
+            ...(showOutside ? [{ label: "Outside", value: outside(reply) }] : []),
           ],
-          ...(enabled
+          ...(showBody
             ? { body: reply.externalMessage !== undefined ? `${bodyText}\n\nOutside ${domainOf(a.address)}:\n${htmlToText(reply.externalMessage)}` : bodyText }
             : {}),
         },

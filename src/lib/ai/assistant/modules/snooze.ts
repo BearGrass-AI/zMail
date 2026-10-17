@@ -20,7 +20,12 @@ export interface SnoozeDeps {
 }
 
 const LIST_MAX = 30;
-const YEAR_MS = 366 * 24 * 3600 * 1000;
+const DAY_MS = 24 * 3600 * 1000;
+const YEAR_MS = 366 * DAY_MS;
+/** Longer snoozes always ask first: they hide mail for a long time. */
+const DIRECT_MAX_MS = 7 * DAY_MS;
+/** Emails named on a card; the rest are counted. */
+const CARD_LINES = 20;
 
 /** Local "YYYY-MM-DDTHH:MM" from the model; null when malformed or not a real date. */
 function parseLocalArg(s: unknown): number | null {
@@ -44,6 +49,16 @@ function before(ids: string[], d: SnoozeDeps): Record<string, number | undefined
 }
 
 const plural = (n: number) => `${n} email${n === 1 ? "" : "s"}`;
+
+/** One line per email ("Sender · Subject"), for a card to show which mail it changes. */
+function emailLines(emails: Email[]): string {
+  const lines = emails.slice(0, CARD_LINES).map((e) => `${e.from.name || e.from.address} · ${e.subject}`);
+  if (emails.length > CARD_LINES) lines.push(`and ${(emails.length - CARD_LINES).toLocaleString()} more`);
+  return lines.join("\n");
+}
+
+/** The subjects of a few emails, for a step line. */
+const subjects = (emails: Email[]) => emails.map((e) => `“${e.subject}”`).join(", ");
 const AWAIT = "A card is waiting for the user's OK. Nothing has happened yet.";
 
 export const snoozeModule: ToolModule = {
@@ -54,7 +69,7 @@ export const snoozeModule: ToolModule = {
   tools: [
     {
       name: "snooze",
-      description: `Hide emails from the inbox until a time, then they return. Give ids or a set_id. Snoozes happen right away (with Undo) while they total ${DIRECT_LIMIT} emails or fewer in this user message; past that the user confirms on a card.`,
+      description: `Hide emails from the inbox until a time, then they return. Give ids or a set_id. Snoozes of up to 7 days happen right away (with Undo) while they total ${DIRECT_LIMIT} emails or fewer in this user message; longer snoozes, and anything past that, the user confirms on a card.`,
       parameters: {
         type: "object",
         properties: {
@@ -88,11 +103,11 @@ export const snoozeModule: ToolModule = {
       if (!emails.length) return { error: "None of those emails were found." };
       const ids = emails.map((e) => e.id);
       const when = whenText(until);
-      if (takeDirect(ids.length)) {
+      if (until - now <= DIRECT_MAX_MS && takeDirect(ids.length)) {
         // Undo puts back an earlier snooze time instead of dropping it.
         const prev = before(ids, d);
         d.snooze(ids, until);
-        useAssistant.getState().push({ kind: "step", text: `Snoozed ${plural(ids.length)} until ${when}` });
+        useAssistant.getState().push({ kind: "step", text: `Snoozed ${subjects(emails)} until ${when}` });
         deps.toast(`Snoozed ${ids.length} until ${when}`, () => d.restore(prev));
         return { status: "snoozed", count: ids.length, until: a.until };
       }
@@ -101,7 +116,7 @@ export const snoozeModule: ToolModule = {
         action: "snooze",
         title: `Snooze ${plural(ids.length)}`,
         detail: `Until ${when}`,
-        preview: { fields: [{ label: "Emails", value: String(ids.length) }, { label: "Until", value: when }] },
+        preview: { fields: [{ label: "Emails", value: String(ids.length) }, { label: "Until", value: when }], body: emailLines(emails) },
         payload: { ids, until },
         confirmLabel: `Snooze ${ids.length}`,
       });
@@ -111,7 +126,8 @@ export const snoozeModule: ToolModule = {
       const d = extOf<SnoozeDeps>(deps, "snooze");
       const emails = resolve(a, d);
       const snoozed = d.snoozed();
-      const ids = emails.map((e) => e.id).filter((id) => id in snoozed);
+      const back = emails.filter((e) => e.id in snoozed);
+      const ids = back.map((e) => e.id);
       if (!ids.length) return { status: "none_snoozed", count: 0 };
       if (!takeDirect(ids.length)) {
         pushConfirmCard({
@@ -119,6 +135,7 @@ export const snoozeModule: ToolModule = {
           action: "unsnooze",
           title: `Unsnooze ${plural(ids.length)}`,
           detail: "They come back to the inbox now.",
+          preview: { body: emailLines(back) },
           payload: { ids },
           confirmLabel: `Unsnooze ${ids.length}`,
         });

@@ -63,9 +63,9 @@ beforeEach(async () => {
 });
 
 describe("approval rule", () => {
-  it("undoable ops on 25 or fewer run directly; everything else confirms", () => {
-    expect(needsConfirm({ kind: "archive" }, 25)).toBe(false);
-    expect(needsConfirm({ kind: "archive" }, 26)).toBe(true);
+  it("undoable ops on 3 or fewer run directly; everything else confirms", () => {
+    expect(needsConfirm({ kind: "archive" }, 3)).toBe(false);
+    expect(needsConfirm({ kind: "archive" }, 4)).toBe(true);
     expect(needsConfirm({ kind: "read", read: true }, 3)).toBe(false);
     expect(needsConfirm({ kind: "section", sectionId: "s" }, 3)).toBe(false);
     expect(needsConfirm({ kind: "trash" }, 1)).toBe(true);

@@ -85,7 +85,7 @@ function failed(content: string): boolean {
 export async function ask(text: string, deps: ToolDeps = realDeps(), provider: GenerativeProvider = assistantProvider(), opts: { retrying?: boolean; display?: { command: string; text: string }; userId?: string; modelKey?: string | null; mentions?: MentionRef[] } = {}) {
   const st = useAssistant.getState();
   if (st.busy || st.clearing || !text.trim()) return;
-  // Each user message gets a fresh 25-email budget for unconfirmed actions. Retry re-runs the same
+  // Each user message gets a fresh DIRECT_LIMIT-email budget for unconfirmed actions. Retry re-runs the same
   // message (only the latest error offers it), so what that message already changed still counts.
   useAssistant.setState((s) => ({ busy: true, directThisTurn: opts.retrying ? s.directThisTurn : 0, progress: null }));
   const chat = st.chatId;

@@ -136,6 +136,28 @@ describe("set_auto_reply card", () => {
     expect(cards()[1].card.result).toBe("Automatic replies updated");
   });
 
+  it("a Turn off / Save card shows any reply text, audience or dates it saves", async () => {
+    const { deps, set } = make();
+    // Plain off with nothing else changing: just the account.
+    await run("set_auto_reply", { account_id: "o", enabled: false }, deps);
+    expect(cards()[0].card.preview).toEqual({ fields: [{ label: "Account", value: "alex@example.org" }] });
+
+    await run("set_auto_reply", { account_id: "o", enabled: false, message: "Planted text", external_message: "Outside text", audience: "contactsOnly", start: "2030-02-01T08:00", end: "2030-02-02T17:00" }, deps);
+    const upd = cards()[1];
+    expect(upd.card.title).toBe("Update automatic replies");
+    expect(upd.card.preview?.body).toContain("Planted text");
+    expect(upd.card.preview?.body).toContain("Outside text");
+    expect(upd.card.preview?.fields?.find((f) => f.label === "Outside")?.value).toBe("Different reply, only contacts");
+    expect(upd.card.preview?.fields?.find((f) => f.label === "When")?.value).toMatch(/Feb 1/);
+    await runConfirm(upd.id, deps);
+    expect(set).toHaveBeenLastCalledWith("o", expect.objectContaining({ enabled: false, message: "Planted text", audience: "contactsOnly" }));
+
+    // Turning off a scheduled reply clears its dates: the card says so.
+    await run("set_auto_reply", { account_id: "g", enabled: false }, deps);
+    expect(cards()[2].card.preview?.fields).toContainEqual({ label: "When", value: "No dates" });
+    expect(cards()[2].card.preview?.body).toBeUndefined();
+  });
+
   it("tells the model to sign in again when the account lacks the permission", async () => {
     const { deps } = make();
     const r = await run("set_auto_reply", { account_id: "n", enabled: true, message: "Away" }, deps);

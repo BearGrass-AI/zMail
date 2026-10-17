@@ -61,10 +61,11 @@ function setup() {
       delete st.rules[s];
     },
     snapshotCategories: (ids) => ({ prev: Object.fromEntries(ids.map((id) => [id, cats[id]])), lessons: [] }),
-    setCategory: (ids, c) => {
-      calls.push(`setCategory:${ids.length}:${c}`);
+    setCategory: (ids, c, teach) => {
+      calls.push(`setCategory:${ids.length}:${c}${teach ? ":teach" : ""}`);
       for (const id of ids) cats[id] = c;
     },
+    sendersOf: (ids) => [...new Set(emails.filter((e) => ids.includes(e.id)).map((e) => e.from.address))],
     restoreCategories: (ids, snap) => {
       for (const id of ids) cats[id] = snap.prev[id];
     },
@@ -101,6 +102,11 @@ function setup() {
 const run = (name: string, args: Record<string, unknown>, deps: ToolDeps) => executeTool({ id: "c1", name, args }, deps);
 const cards = () => useAssistant.getState().items.filter((i) => i.kind === "card");
 const lastCardId = () => cards().at(-1)!.id;
+const confirmCard = () => {
+  const c = cards().at(-1)!;
+  if (c.kind !== "card" || c.card.type !== "confirm") throw new Error("not a confirm card");
+  return c.card;
+};
 const know = (...ids: string[]) => useAssistant.getState().remember(ids.map((id) => ({ id, accountId: "g" })));
 
 beforeEach(() => useAssistant.getState().newChat());
@@ -113,12 +119,22 @@ describe("rules", () => {
     expect(r.always_file).toEqual([{ sender: "boss@x.com", folder: "Receipts" }]);
   });
 
-  it("toggles a rule at once with an Undo toast; unknown id errors", async () => {
-    const { deps, calls, toasts } = setup();
-    await run("set_rule_enabled", { id: "r1", enabled: false }, deps);
-    expect(calls).toContain("enable:r1:false");
-    toasts[0].undo!();
-    expect(calls.at(-1)).toBe("enable:r1:true");
+  it("turns a rule on or off only after a card that names the rule; unknown id errors", async () => {
+    const { deps, calls } = setup();
+    const res = await run("set_rule_enabled", { id: "r1", enabled: false }, deps);
+    expect(res.content).toMatchObject({ status: "awaiting_confirmation" });
+    expect(calls).toEqual([]);
+    const card = confirmCard();
+    expect(card.title).toBe("Turn off rule");
+    expect(card.detail).toContain("news.com");
+    expect(card.preview?.fields?.find((f) => f.label === "Rule")?.value).toContain("news.com");
+    await runConfirm(lastCardId(), deps);
+    expect(calls).toEqual(["enable:r1:false"]);
+    expect(confirmCard()).toMatchObject({ status: "done", result: "Rule turned off" });
+    // Already in that state: nothing to confirm.
+    const same = await run("set_rule_enabled", { id: "r1", enabled: false }, deps);
+    expect(same.content).toMatchObject({ id: "r1", enabled: false });
+    expect(cards()).toHaveLength(1);
     const bad = await run("set_rule_enabled", { id: "nope", enabled: true }, deps);
     expect(JSON.stringify(bad)).toContain("unknown rule id");
   });
@@ -152,24 +168,61 @@ describe("rules", () => {
 });
 
 describe("categories", () => {
-  it("sets up to 25 at once and Undo restores previous values", async () => {
-    const { deps, cats, toasts } = setup();
+  it("sets up to 3 at once for display only (the sorting model isn't taught), and Undo restores previous values", async () => {
+    const { deps, cats, calls, toasts } = setup();
     know("m1", "m2");
-    await run("set_category", { ids: ["m1", "m2"], category: "promotions" }, deps);
+    const r = await run("set_category", { ids: ["m1", "m2"], category: "promotions" }, deps);
+    expect(r.content).toMatchObject({ done: 2, category: "promotions", taught: false });
+    expect(calls).toEqual(["setCategory:2:promotions"]);
     expect(cats).toMatchObject({ m1: "promotions", m2: "promotions" });
     toasts[0].undo!();
     expect(cats.m1).toBe("updates");
     expect(cats.m2).toBeUndefined();
   });
 
-  it("uses a confirm card past 25 emails", async () => {
+  it("uses a confirm card past 3 emails, still display only, naming the senders", async () => {
     const { deps, calls, cats } = setup();
-    know(...emails.slice(0, 30).map((e) => e.id));
-    const res = await run("set_category", { ids: emails.slice(0, 30).map((e) => e.id), category: "social" }, deps);
+    know(...emails.slice(0, 4).map((e) => e.id));
+    const res = await run("set_category", { ids: emails.slice(0, 4).map((e) => e.id), category: "social" }, deps);
     expect(JSON.stringify(res)).toContain("awaiting_confirmation");
-    expect(cats.m5).toBeUndefined();
+    expect(cats.m3).toBeUndefined();
+    const card = confirmCard();
+    expect(card.preview?.fields?.find((f) => f.label === "From")?.value).toContain("s0@shop.com");
+    expect(card.detail).toMatch(/doesn't learn/);
     await runConfirm(lastCardId(), deps);
-    expect(calls).toEqual(["setCategory:30:social"]);
+    expect(calls).toEqual(["setCategory:4:social"]);
+  });
+
+  it("teaching the sorting model always asks first, on a card that names the senders and says so", async () => {
+    const { deps, calls } = setup();
+    know("m1", "m2");
+    const res = await run("set_category", { ids: ["m1", "m2"], category: "promotions", teach: true }, deps);
+    expect(res.content).toMatchObject({ status: "awaiting_confirmation" });
+    expect(calls).toEqual([]);
+    const card = confirmCard();
+    expect(card.preview?.fields?.find((f) => f.label === "From")?.value).toBe("s1@shop.com, s2@shop.com");
+    expect(card.detail).toMatch(/sorting model will learn/i);
+    await runConfirm(lastCardId(), deps);
+    expect(calls).toEqual(["setCategory:2:promotions:teach"]);
+  });
+
+  it("the real store records lessons only for a confirmed teach", async () => {
+    const { organizeModule } = await import("@/lib/ai/assistant/modules/organize");
+    const { useMail } = await import("@/lib/store");
+    const { senderExamples } = await import("@/lib/store/learning");
+    const real = organizeModule.realDeps!() as OrganizeDeps;
+    const saved = { emails: useMail.getState().emails, lessons: useMail.getState().lessons, categoryOverrides: useMail.getState().categoryOverrides };
+    try {
+      useMail.setState({ emails: [mk(1)], lessons: [], categoryOverrides: {} });
+      real.setCategory(["m1"], "promotions", false);
+      expect(useMail.getState().categoryOverrides.m1).toBe("promotions");
+      expect(senderExamples(useMail.getState().emails, useMail.getState().lessons).get("s1@shop.com")?.categories).toBeUndefined();
+      real.setCategory(["m1"], "promotions", true);
+      expect(senderExamples(useMail.getState().emails, useMail.getState().lessons).get("s1@shop.com")?.categories).toEqual([{ subject: "Order 1", category: "promotions" }]);
+      expect(real.sendersOf(["m1"])).toEqual(["s1@shop.com"]);
+    } finally {
+      useMail.setState(saved);
+    }
   });
 
   it("rejects unknown ids and bad categories", async () => {
@@ -196,12 +249,30 @@ describe("sections", () => {
     expect(JSON.stringify(await run("create_section", { name: "bills", description: "x" }, deps))).toContain("already exists");
   });
 
-  it("updates a section at once and re-sorts stale mail; unknown id errors", async () => {
+  it("updates a section only after a card showing the full new text, then re-sorts stale mail; unknown id errors", async () => {
     const { deps, calls, st } = setup();
-    await run("update_section", { id: "sec1", description: "new text" }, deps);
-    expect(st.sections[0].description).toBe("new text");
+    const long = `Any email about account security, sign-in alerts or invoices. ${"More words. ".repeat(20)}`.trim();
+    const res = await run("update_section", { id: "sec1", name: "Money", description: long }, deps);
+    expect(res.content).toMatchObject({ status: "awaiting_confirmation" });
+    expect(st.sections[0]).toMatchObject({ name: "Bills", description: "bills" });
+    expect(calls).toEqual([]);
+    const card = confirmCard();
+    expect(card.preview?.fields).toEqual([
+      { label: "Name", value: "Money" },
+      { label: "Description", value: long },
+    ]);
+    await runConfirm(lastCardId(), deps);
+    expect(st.sections[0]).toMatchObject({ name: "Money", description: long });
     expect(calls).toEqual(["updateSection:sec1", 'sort:{"staleSections":true}']);
     expect(JSON.stringify(await run("update_section", { id: "nope", name: "x" }, deps))).toContain("unknown section");
+  });
+
+  it("caps section descriptions, which the sorting model reads as criteria", async () => {
+    const { deps } = setup();
+    const huge = "x".repeat(501);
+    expect(JSON.stringify(await run("update_section", { id: "sec1", description: huge }, deps))).toContain("500 characters or fewer");
+    expect(JSON.stringify(await run("create_section", { name: "New", description: huge }, deps))).toContain("500 characters or fewer");
+    expect(cards()).toHaveLength(0);
   });
 
   it("deletes a section on confirm", async () => {
@@ -273,22 +344,22 @@ describe("resort", () => {
 });
 
 describe("direct-action budget", () => {
-  it("set_category shares the 25-email message budget with other modules", async () => {
+  it("set_category shares the 3-email message budget with other modules", async () => {
     const { deps, calls } = setup();
     know(...emails.map((e) => e.id));
-    useAssistant.setState({ directThisTurn: 20 });
-    await run("set_category", { ids: ["m1", "m2", "m3", "m4", "m5", "m6"], category: "social" }, deps);
+    useAssistant.setState({ directThisTurn: 1 });
+    await run("set_category", { ids: ["m1", "m2", "m3"], category: "social" }, deps);
     expect(calls).toEqual([]);
     expect(cards().at(-1)!.kind === "card" && (cards().at(-1) as { card: { type: string } }).card.type).toBe("confirm");
-    await run("set_category", { ids: ["m1", "m2", "m3", "m4", "m5"], category: "social" }, deps);
-    expect(calls).toEqual(["setCategory:5:social"]);
-    expect(useAssistant.getState().directThisTurn).toBe(25);
+    await run("set_category", { ids: ["m1", "m2"], category: "social" }, deps);
+    expect(calls).toEqual(["setCategory:2:social"]);
+    expect(useAssistant.getState().directThisTurn).toBe(3);
   });
 
   it("dismiss_suggestions past the budget shows a card", async () => {
     const { deps, calls } = setup();
     know("m0", "m2");
-    useAssistant.setState({ directThisTurn: 24 });
+    useAssistant.setState({ directThisTurn: 2 });
     const r = await run("dismiss_suggestions", { ids: ["m0", "m2"] }, deps);
     expect(r.content).toMatchObject({ status: "awaiting_confirmation" });
     expect(calls).toEqual([]);

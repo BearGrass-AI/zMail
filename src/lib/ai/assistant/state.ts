@@ -169,7 +169,7 @@ interface AssistantState {
   refFor: (e: Email) => string;
   /** Set shown in the mail list, if any. */
   activeSetId: string | null;
-  /** Emails changed without a confirm card during the current user message (the 25-email budget). */
+  /** Emails changed without a confirm card during the current user message (the DIRECT_LIMIT budget). */
   directThisTurn: number;
   /** Long-running work in the current turn ("Reading 1,200 / 3,000…"); not saved. */
   progress: string | null;

@@ -4,7 +4,7 @@ import { AlertCircle, Copy, Globe, Loader2, PenLine } from "lucide-react";
 import { toast } from "sonner";
 import type { Item } from "@/lib/ai/assistant/state";
 import { useAssistant, type RefInfo } from "@/lib/ai/assistant/state";
-import { addEvent, dismissEvent, rerunSetChip, reviewSet } from "@/lib/ai/assistant/cards";
+import { addEvent, dismissEvent, eventDetail, rerunSetChip, reviewSet } from "@/lib/ai/assistant/cards";
 import { retry } from "@/lib/ai/assistant/loop";
 import { splitMentions } from "@/lib/ai/assistant/mentions";
 import { useSettings } from "@/lib/settings";
@@ -298,7 +298,7 @@ export function MessageItem({ item, last = false }: { item: Item; last?: boolean
       if (c.status !== "pending") return <div className="text-[11.5px] text-foreground/45">{c.status === "added" ? `✓ Added “${c.event.title}” to your calendar` : `Dismissed “${c.event.title}”`}</div>;
       return (
         <SuggestionCard
-          sug={{ id: item.id, kind: "extracted", title: c.event.title, detail: c.event.location ?? c.event.notes ?? "", start: c.event.start, end: c.event.end, allDay: c.event.allDay, calendarId: realDeps().defaultCalendar() ?? "", emailId: c.event.emailId, label: "event" }}
+          sug={{ id: item.id, kind: "extracted", title: c.event.title, detail: eventDetail(c.event), start: c.event.start, end: c.event.end, allDay: c.event.allDay, calendarId: realDeps().defaultCalendar() ?? "", emailId: c.event.emailId, label: "event" }}
           onAccept={(calendarId) => addEvent(item.id, calendarId)}
           onDismiss={() => dismissEvent(item.id)}
         />

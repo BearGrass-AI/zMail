@@ -65,27 +65,42 @@ describe("snooze", () => {
     expect(JSON.stringify(unk)).toMatch(/unknown id/);
   });
 
-  it("snoozes exactly 25 at once but asks first for 26", async () => {
-    const ids25 = emails.slice(0, 25).map((e) => e.id);
-    await run("snooze", { ids: ids25, until: future(1) });
-    expect(Object.keys(snoozed)).toHaveLength(25);
+  it("snoozes exactly 3 at once but asks first for 4, on a card listing the emails", async () => {
+    const ids3 = emails.slice(0, 3).map((e) => e.id);
+    await run("snooze", { ids: ids3, until: future(1) });
+    expect(Object.keys(snoozed)).toHaveLength(3);
     snoozed = {};
-    const ids26 = emails.slice(0, 26).map((e) => e.id);
-    const r = await run("snooze", { ids: ids26, until: future(1) });
+    useAssistant.setState({ directThisTurn: 0 });
+    const ids4 = emails.slice(0, 4).map((e) => e.id);
+    const r = await run("snooze", { ids: ids4, until: future(1) });
     expect(r.content).toMatchObject({ status: "awaiting_confirmation" });
     expect(snoozed).toEqual({});
     const item = useAssistant.getState().items.find((i) => i.kind === "card")!;
-    expect(item.kind === "card" && item.card.type === "confirm" && item.card.confirmLabel).toBe("Snooze 26");
+    if (item.kind !== "card" || item.card.type !== "confirm") throw new Error("expected a confirm card");
+    expect(item.card.confirmLabel).toBe("Snooze 4");
+    expect(item.card.preview?.body?.split("\n")).toEqual(["S0 · Sub 0", "S1 · Sub 1", "S2 · Sub 2", "S3 · Sub 3"]);
     await runConfirm(item.id, deps);
-    expect(Object.keys(snoozed)).toHaveLength(26);
+    expect(Object.keys(snoozed)).toHaveLength(4);
   });
 
-  it("shares one 25-email budget per user message: a second snooze of 20 becomes a card", async () => {
-    const first = await run("snooze", { ids: emails.slice(0, 20).map((e) => e.id), until: future(1) });
-    expect(first.content).toMatchObject({ status: "snoozed", count: 20 });
-    const second = await run("snooze", { ids: emails.slice(10, 30).map((e) => e.id), until: future(2) });
-    expect(second.content).toMatchObject({ status: "awaiting_confirmation", count: 20 });
-    expect(Object.keys(snoozed)).toHaveLength(20);
+  it("a snooze longer than 7 days asks first, even for one email", async () => {
+    const week = await run("snooze", { ids: ["e1"], until: future(6) });
+    expect(week.content).toMatchObject({ status: "snoozed" });
+    const r = await run("snooze", { ids: ["e2"], until: future(9) });
+    expect(r.content).toMatchObject({ status: "awaiting_confirmation", count: 1 });
+    expect(Object.keys(snoozed)).toEqual(["e1"]);
+    const item = useAssistant.getState().items.find((i) => i.kind === "card")!;
+    if (item.kind !== "card" || item.card.type !== "confirm") throw new Error("expected a confirm card");
+    expect(item.card.preview?.fields?.find((f) => f.label === "Until")?.value).toBeTruthy();
+    expect(item.card.preview?.body).toBe("S2 · Sub 2");
+  });
+
+  it("shares one 3-email budget per user message: a second snooze of 2 becomes a card", async () => {
+    const first = await run("snooze", { ids: emails.slice(0, 2).map((e) => e.id), until: future(1) });
+    expect(first.content).toMatchObject({ status: "snoozed", count: 2 });
+    const second = await run("snooze", { ids: emails.slice(2, 4).map((e) => e.id), until: future(2) });
+    expect(second.content).toMatchObject({ status: "awaiting_confirmation", count: 2 });
+    expect(Object.keys(snoozed)).toHaveLength(2);
     expect(useAssistant.getState().items.filter((i) => i.kind === "card")).toHaveLength(1);
   });
 

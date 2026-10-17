@@ -110,7 +110,7 @@ describe("approval gate", () => {
     expect(deps.bulkCalls).toHaveLength(1);
   });
 
-  it("confirms an archive of 26 or more, and any trash", async () => {
+  it("confirms an archive of 4 or more, and any trash", async () => {
     const deps = fakeDeps();
     const { set_id } = (await executeTool(call("search_mail", { query: { from: "amazon.com" } }), deps)).content as { set_id: string };
     expect(((await executeTool(call("act", { set_id, op: "archive" }), deps)).content as { status: string }).status).toBe("awaiting_confirmation");
@@ -254,14 +254,22 @@ describe("hardening", () => {
     expect(await executeTool(call("act", { op: "archive", ids: "m0" }), fakeDeps())).toMatchObject({ malformed: true });
   });
 
-  it("gate boundary: 25 runs directly, 26 shows a card", async () => {
+  it("gate boundary: 3 runs directly, 4 shows a card", async () => {
     const deps = fakeDeps();
-    useAssistant.getState().remember(all.slice(0, 26).map((e) => ({ id: e.id, accountId: "g" })));
+    useAssistant.getState().remember(all.slice(0, 4).map((e) => ({ id: e.id, accountId: "g" })));
     const ids = (n: number) => all.slice(0, n).map((e) => e.id);
-    expect(((await executeTool(call("act", { ids: ids(25), op: "archive" }), deps)).content as { done: number }).done).toBe(25);
+    expect(((await executeTool(call("act", { ids: ids(3), op: "archive" }), deps)).content as { done: number }).done).toBe(3);
     useAssistant.setState({ directThisTurn: 0 });
-    expect(((await executeTool(call("act", { ids: ids(26), op: "archive" }), deps)).content as { status: string }).status).toBe("awaiting_confirmation");
+    expect(((await executeTool(call("act", { ids: ids(4), op: "archive" }), deps)).content as { status: string }).status).toBe("awaiting_confirmation");
     expect(getCards().map((c) => c.kind === "card" && c.card.type === "bulk" && c.card.status)).toEqual(["done", "pending"]);
+  });
+
+  it("small acts can't add up past 3 emails in one user message", async () => {
+    const deps = fakeDeps();
+    useAssistant.getState().remember(all.slice(0, 4).map(ref));
+    expect((await executeTool(call("act", { ids: ["m0", "m1"], op: "mark_read" }), deps)).content).toMatchObject({ done: 2 });
+    expect((await executeTool(call("act", { ids: ["m2", "m3"], op: "set_lane", lane: "ready_archive" }), deps)).content).toMatchObject({ status: "awaiting_confirmation" });
+    expect(deps.bulkCalls).toHaveLength(1);
   });
 
   it("a failing run leaves the card partial and resumable", async () => {
@@ -335,10 +343,10 @@ describe("final fixes: undo lifetime, progress and skipped", () => {
     let undo: (() => void) | undefined;
     let undoCalls = 0;
     const deps = fakeDeps({ toast: (_t, u) => void (u && (undo = u)), undo: async (u) => (undoCalls++, { done: u.length, skipped: 0, failed: [], undo: [] }) });
-    useAssistant.getState().remember(all.slice(0, 12).map(ref));
-    await executeTool(call("act", { ids: all.slice(0, 12).map((e) => e.id), op: "archive" }), deps);
+    useAssistant.getState().remember(all.slice(0, 3).map(ref));
+    await executeTool(call("act", { ids: all.slice(0, 3).map((e) => e.id), op: "archive" }), deps);
     const [card] = bulkCards();
-    expect([card.status, card.title, card.undo?.length]).toEqual(["done", "Archived 12 emails", 12]);
+    expect([card.status, card.title, card.undo?.length]).toEqual(["done", "Archived 3 emails", 3]);
     undo!();
     await new Promise((r) => setTimeout(r, 0));
     expect(cardOf(card.id).status).toBe("undone");
