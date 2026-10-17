@@ -166,6 +166,17 @@ describe("forwardKeys", () => {
     expect(seen).toHaveLength(0);
   });
 
+  // Typing into something the email drew to look like a text box must not archive, trash or reply.
+  it("forwards only navigation and modifier shortcuts, never single-key mail actions", () => {
+    const { seen, press } = setup();
+    for (const key of ["e", "#", "Backspace", "!", "d", "s", "v", "r", "a", "R", "f", "c", "x", "u", "y", "t"]) press({ key });
+    expect(seen).toHaveLength(0);
+    for (const key of ["j", "k", "ArrowDown", "ArrowUp", "Escape"]) press({ key });
+    press({ key: "k", metaKey: true });
+    press({ key: "j", ctrlKey: true });
+    expect(seen.map((e) => e.key)).toEqual(["j", "k", "ArrowDown", "ArrowUp", "Escape", "k", "j"]);
+  });
+
   it("does not forward keys from editable elements", () => {
     const { seen, press } = setup("<div contenteditable='true'><span id='e'>x</span></div>");
     press({ key: "j" }, "#e");
@@ -177,12 +188,12 @@ describe("forwardKeys", () => {
     const handler = (e: Event) => e.preventDefault();
     window.addEventListener("keydown", handler);
     cleanups.push(() => window.removeEventListener("keydown", handler));
-    expect(press({ key: "e" }).defaultPrevented).toBe(true);
+    expect(press({ key: "j" }).defaultPrevented).toBe(true);
   });
 
   it("leaves default alone when the app does not handle it", () => {
     const { press } = setup();
-    expect(press({ key: "e" }).defaultPrevented).toBe(false);
+    expect(press({ key: "j" }).defaultPrevented).toBe(false);
   });
 
   it("stops forwarding after cleanup", () => {
