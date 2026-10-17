@@ -41,6 +41,25 @@ export function frameSrcDoc(css: string, html: string, allowRemote = false) {
   return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${frameCsp(allowRemote)}"><meta charset="utf-8"><style>${css}</style></head><body>${html}</body></html>`;
 }
 
+/**
+ * Link clicks in the email document go to `open` (the app's scheme-checked external open)
+ * instead of navigating the frame: <a>, image-map <area>, and anything else with an href
+ * (SVG and MathML links), which is blocked without opening. Returns a cleanup.
+ */
+export function interceptLinks(doc: Document, open: (url: string) => void): () => void {
+  const onClick = (e: MouseEvent) => {
+    const link = (e.target as Element).closest("a, area, [href]");
+    if (!link) return;
+    e.preventDefault();
+    // The frame's own element classes, so instanceof against this window would fail.
+    const name = link.localName;
+    const href = (link as HTMLAnchorElement).href;
+    if ((name === "a" || name === "area") && typeof href === "string") open(href);
+  };
+  doc.addEventListener("click", onClick);
+  return () => doc.removeEventListener("click", onClick);
+}
+
 const EDITABLE = "input, textarea, select, [contenteditable]";
 // Native inside the email: select all text, copy.
 const NATIVE_MOD = new Set(["a", "c"]);

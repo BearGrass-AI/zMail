@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { forwardKeys, frameCsp, frameSrcDoc } from "@/lib/mail/email-frame";
+import { forwardKeys, frameCsp, frameSrcDoc, interceptLinks } from "@/lib/mail/email-frame";
 import { prepareHtml } from "@/components/mail/email-body";
 import tauriConf from "../../../src-tauri/tauri.conf.json";
 
@@ -69,6 +69,50 @@ describe("app CSP (tauri.conf.json)", () => {
   it("frame CSP still blocks script in both modes", () => {
     expect(parse(frameCsp(false))["script-src"]).toEqual(["'none'"]);
     expect(parse(frameCsp(true))["script-src"]).toEqual(["'none'"]);
+  });
+});
+
+describe("interceptLinks", () => {
+  function setup(inner: string) {
+    const doc = document.implementation.createHTMLDocument("email");
+    doc.body.innerHTML = inner;
+    const opened: string[] = [];
+    const stop = interceptLinks(doc, (url) => opened.push(url));
+    const click = (selector: string) => {
+      const ev = new MouseEvent("click", { bubbles: true, cancelable: true });
+      doc.querySelector(selector)!.dispatchEvent(ev);
+      return ev;
+    };
+    return { opened, click, stop };
+  }
+
+  it("opens a link through the app instead of navigating the frame", () => {
+    const { opened, click } = setup(`<a href="https://info.example.org/x"><span id="t">x</span></a>`);
+    expect(click("#t").defaultPrevented).toBe(true);
+    expect(opened).toEqual(["https://info.example.org/x"]);
+  });
+
+  // An image map's <area> is a link too; a click on the image lands on it.
+  it("handles image-map areas like links", () => {
+    const { opened, click } = setup(`<img usemap="#m" src="data:image/png;base64,AAAA"><map name="m"><area id="rel" href="/" shape="rect" coords="0,0,10,10"><area id="ext" href="https://info.example.org/a"></map>`);
+    expect(click("#rel").defaultPrevented).toBe(true);
+    expect(click("#ext").defaultPrevented).toBe(true);
+    expect(opened).toHaveLength(2);
+    expect(opened[1]).toBe("https://info.example.org/a");
+  });
+
+  it("blocks any other element with an href without opening anything", () => {
+    const { opened, click } = setup(`<math href="/"><mi id="m">x</mi></math>`);
+    expect(click("#m").defaultPrevented).toBe(true);
+    expect(opened).toEqual([]);
+  });
+
+  it("leaves other clicks alone, and stops after cleanup", () => {
+    const { opened, click, stop } = setup(`<p id="p">hi</p><a id="a" href="https://info.example.org/x">x</a>`);
+    expect(click("#p").defaultPrevented).toBe(false);
+    stop();
+    expect(click("#a").defaultPrevented).toBe(false);
+    expect(opened).toEqual([]);
   });
 });
 

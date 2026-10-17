@@ -9,7 +9,7 @@ import type { Email } from "@/lib/types";
 import { create } from "zustand";
 import { useMail } from "@/lib/store";
 import { useSettings } from "@/lib/settings";
-import { DARK_CSS, LIGHT_CSS, forwardKeys, frameSrcDoc } from "@/lib/mail/email-frame";
+import { DARK_CSS, LIGHT_CSS, forwardKeys, frameSrcDoc, interceptLinks } from "@/lib/mail/email-frame";
 import { adaptedFor, canRenderDark, darkKindFor, sanitizedFor, type DarkKind } from "@/lib/mail/dark-mode";
 import { useAppDark } from "@/lib/theme";
 
@@ -86,9 +86,9 @@ export function prepareHtml(html: string, allowImages: boolean, mode: "light" | 
       blocked++;
     }
   }
-  // Every link asks for a new window, which the app opens in the default browser.
-  // A link without a target would otherwise navigate the email frame itself.
-  for (const a of doc.querySelectorAll("a[href]")) {
+  // Every link (image-map areas too) asks for a new window, which the app opens in the
+  // default browser. A link without a target would otherwise navigate the email frame itself.
+  for (const a of doc.querySelectorAll("a[href], area[href]")) {
     a.setAttribute("target", "_blank");
     a.setAttribute("rel", "noopener noreferrer");
   }
@@ -152,12 +152,7 @@ function HtmlFrame({ html, dark, allowRemote }: { html: string; dark: boolean; a
       measure();
       observer = new ResizeObserver(measure);
       observer.observe(doc.body);
-      doc.addEventListener("click", (e) => {
-        const a = (e.target as HTMLElement).closest("a");
-        if (!a) return;
-        e.preventDefault();
-        void openExternal(a.href);
-      });
+      interceptLinks(doc, (url) => void openExternal(url));
       stopKeys?.();
       stopKeys = forwardKeys(doc, frame);
     };
