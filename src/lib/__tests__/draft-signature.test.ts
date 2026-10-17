@@ -50,6 +50,7 @@ const { providers } = await import("@/lib/store/providers");
 const { Composer } = await import("@/components/mail/composer");
 const { GraphProvider } = await import("@/lib/microsoft/graph");
 const { HttpError } = await import("@/lib/transport");
+const { browserImageTools } = await import("@/lib/signature");
 
 const LOGO = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const SIGNATURE = {
@@ -207,8 +208,8 @@ describe.each([
 });
 
 /** Open a draft whose stored HTML is `html`, with a provider that has no inline parts. */
-async function openStored(account: Account, html: string) {
-  const p = fakeProvider({ account, draftIdFor: async (id) => id, forgetDraftQuote: () => {}, inlineImages: vi.fn(async () => []) });
+async function openStored(account: Account, html: string, extra: Partial<MailProvider> = {}) {
+  const p = fakeProvider({ account, draftIdFor: async (id) => id, forgetDraftQuote: () => {}, inlineImages: vi.fn(async () => []), ...extra });
   providers.set(account.id, p);
   const email: Email = { id: "m1", accountId: account.id, threadId: "m1", folderId: folders.find((f) => f.accountId === account.id)!.id, from: { name: "", address: "" }, to: [], subject: "Hi", snippet: "", text: "", html, date: "2026-10-14T10:00:00Z", unread: false, starred: false, labels: [] };
   useMail.setState({ emails: [email] });
@@ -243,6 +244,47 @@ describe("a marked signature block from the server", () => {
     const shown = preview()!;
     expect(shown.innerHTML).not.toMatch(/https:\/\/tracker|<script|onerror/i);
     expect(shown.textContent).toContain("Alex");
+  });
+
+  it("loads none of its remote images when the draft is saved again", async () => {
+    const saved: SendRequest[] = [];
+    const measure = vi.spyOn(browserImageTools, "naturalSize").mockResolvedValue(null);
+    try {
+      await openStored(gmail, `<div>Body text</div><br><div class="zmail-signature"><img src="https://tracker.example/p.png"><b>Alex</b></div>`, {
+        saveDraft: async (msg) => (saved.push(msg), { draftId: "d1", messageId: "m1" }),
+      });
+      await act(async () => saveButton().click());
+      expect(saved).toHaveLength(1);
+      expect(measure).not.toHaveBeenCalled();
+    } finally {
+      measure.mockRestore();
+    }
+  });
+
+  it("opens its links in the browser, never in the app window", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    try {
+      await openStored(gmail, `<div>Body text</div><br><div class="zmail-signature"><a href="https://phish.example/login"><b>Sign in</b></a></div>`);
+      const ev = new MouseEvent("click", { bubbles: true, cancelable: true });
+      await act(async () => void preview()!.querySelector("b")!.dispatchEvent(ev));
+      expect(ev.defaultPrevented).toBe(true);
+      expect(open).toHaveBeenCalledWith("https://phish.example/login", "_blank", "noopener");
+    } finally {
+      open.mockRestore();
+    }
+  });
+
+  it("is not taken from the quoted original of a reply started in Outlook", async () => {
+    const { c } = await openStored(
+      outlook,
+      `<html><body dir="ltr"><div>Sounds good.</div><div id="appendonsend"></div><hr style="display:inline-block;width:98%"><div id="divRplyFwdMsg"><b>From:</b> Ann</div>` +
+        `<div><div class="zmail-signature"><img src="https://tracker.example/p.png"><a href="https://phish.example/login">Ann</a></div>Earlier message</div></body></html>`,
+      // Like Graph, which can keep a reply's quote under our text.
+      { keepDraftQuote: () => {} },
+    );
+    expect(c.signatureHtml).toBeUndefined();
+    expect(preview()).toBeNull();
+    expect(c.prefill!.body).toContain("Sounds good.");
   });
 
   it("is left in the body when the draft goes on after it and the provider can't keep a reply's quote", async () => {

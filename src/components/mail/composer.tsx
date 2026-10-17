@@ -22,6 +22,7 @@ import { draftRequest } from "@/lib/ai/assistant/draft-request";
 import { useAssistant } from "@/lib/ai/assistant/state";
 import { ask as askAssistant } from "@/lib/ai/assistant/loop";
 import { htmlToText, inlineDataImages, sanitizeSignature, sizeSignatureImages, withoutRemoteLoads } from "@/lib/signature";
+import { openExternal } from "./email-body";
 import { Clock } from "lucide-react";
 import { SendLaterMenu } from "./send-later-menu";
 import { OUTLOOK_SERVER_HOLD, longWhen, whenLabel } from "@/lib/mail/scheduled";
@@ -288,7 +289,8 @@ export function Composer() {
 
   /** The email as it would be sent (and as a draft is saved). */
   const buildRequest = async (d: Doc, to = split(d.to), cc = split(d.cc), bcc = split(d.bcc)): Promise<SendRequest> => {
-    const { html, inline } = inlineDataImages(await sizeSignatureImages(composeRichHtml(d.body, signature)));
+    // A draft's signature came from the server: measuring its images mustn't fetch anything.
+    const { html, inline } = inlineDataImages(await sizeSignatureImages(composeRichHtml(d.body, signature), undefined, { remote: sigId !== DRAFT_SIG }));
     return {
       to,
       cc,
@@ -790,6 +792,13 @@ export function Composer() {
                   <div
                     className="max-h-[220px] overflow-auto rounded-lg bg-white px-4 py-3 text-[11pt] text-[#1d1d1f] ring-1 ring-hairline [font-family:Aptos,Calibri,Helvetica,Arial,sans-serif] [&_a]:text-[#0563c1] [&_a]:underline"
                     dangerouslySetInnerHTML={{ __html: signaturePreview }}
+                    // A link here would otherwise load in the app's own window.
+                    onClick={(e) => {
+                      const a = (e.target as HTMLElement).closest("a");
+                      if (!a) return;
+                      e.preventDefault();
+                      void openExternal(a.href);
+                    }}
                   />
                 )}
               </div>
