@@ -24,7 +24,7 @@ import { CategoryItems, useEmailActions } from "../email-actions";
 import { CompactRow, RichRow } from "../mail/email-row";
 import { SelectAll } from "../selection";
 import { ShowMore, usePaged } from "../show-more";
-import { BUCKET_META, CATEGORY_META, SECTION_ICON } from "@/lib/meta";
+import { BUCKET_META, categoryMeta, SECTION_ICON } from "@/lib/meta";
 import { Tile, tint } from "../meta";
 import { AgendaRail } from "./agenda-rail";
 import { useSettings } from "@/lib/settings";
@@ -234,7 +234,7 @@ function BundleCard({
             )}
           >
             <div className="flex items-center gap-2.5">
-              <Tile icon={CATEGORY_META[category].icon} k={category} size={28} />
+              <Tile icon={categoryMeta(category).icon} k={category} size={28} />
               <span className="truncate text-[13px] font-semibold">{BUNDLE_TITLES[category]}</span>
               <span className="ml-auto text-[19px] font-semibold tracking-[-0.02em] tabular-nums">{emails.length}</span>
             </div>

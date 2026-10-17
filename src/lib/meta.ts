@@ -11,6 +11,7 @@ import {
   Heart,
   House,
   KeyRound,
+  Mail,
   Megaphone,
   MessagesSquare,
   Newspaper,
@@ -41,6 +42,13 @@ export const CATEGORY_META: Record<Category, { label: string; icon: LucideIcon }
   newsletters: { label: "Newsletters", icon: Newspaper },
   security: { label: "Sign-ins & security", icon: KeyRound },
 };
+
+const UNKNOWN_CATEGORY = { label: "Other", icon: Mail };
+
+/** A kind's label and icon; one zMail doesn't know (bad saved state, an odd model answer) gets a plain tile instead of breaking the view. */
+export function categoryMeta(c: string): { label: string; icon: LucideIcon } {
+  return Object.hasOwn(CATEGORY_META, c) ? CATEGORY_META[c as Category] : UNKNOWN_CATEGORY;
+}
 
 export const SECTION_ICON: Record<SectionIcon, LucideIcon> = {
   "credit-card": CreditCard,

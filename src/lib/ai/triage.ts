@@ -9,12 +9,13 @@ import type {
   SenderHabit,
   Triage,
 } from "@/lib/types";
-import { BUCKETS } from "@/lib/types";
+import { BUCKETS, CATEGORIES } from "@/lib/types";
 import { NO_SECTION, sectionHistory, sectionQuestion, sectionsFor, sectionsKey, type MailSection } from "@/lib/sections";
 import type {
   ChoiceAnswer,
   DecisionProvider,
   DecisionRequest,
+  DecisionResponse,
   NoulAnswer,
   Question,
   ScoreAnswer,
@@ -216,6 +217,20 @@ export function consistentBucket(t: Pick<Triage, "bucket" | "category">): Bucket
   return ARCHIVE_KINDS.includes(t.category) ? "ready_archive" : t.bucket;
 }
 
+/**
+ * The model's choice for one question, if it is one of the options that question offered. A remote
+ * model can answer anything; an answer that wasn't offered counts as no answer, and the log gets its
+ * length rather than its text.
+ */
+function offered(req: DecisionRequest, res: DecisionResponse, key: string): string | undefined {
+  const question = req.questions[key];
+  const choice = (res.answers[key] as ChoiceAnswer | undefined)?.choice;
+  if (choice === undefined || question?.type !== "choice") return undefined;
+  if (typeof choice === "string" && Object.hasOwn(question.criteria, choice)) return choice;
+  console.warn(`[triage] ignored a ${key} answer that wasn't one of the options (${typeof choice === "string" ? `${choice.length} chars` : typeof choice})`);
+  return undefined;
+}
+
 export async function triageEmail(
   provider: DecisionProvider,
   email: Email,
@@ -225,39 +240,46 @@ export async function triageEmail(
   sections: MailSection[] = [],
   examples?: SenderExamples,
 ): Promise<Triage> {
-  const res = await provider.decide(buildRequest(email, me, folders, habit, provider.maxChoiceOptions, sections, examples));
+  const req = buildRequest(email, me, folders, habit, provider.maxChoiceOptions, sections, examples);
+  const res = await provider.decide(req);
   const a = res.answers;
-  const bucket = a.bucket as ChoiceAnswer;
-  const category = a.category as ChoiceAnswer;
   const urgency = a.urgency as ScoreAnswer;
   const reply = a.needs_reply as NoulAnswer;
-  const folder = a.folder as ChoiceAnswer | undefined;
-  const section = a.section as ChoiceAnswer | undefined;
+  const bucketChoice = offered(req, res, "bucket");
+  const categoryChoice = offered(req, res, "category");
+  const folderChoice = offered(req, res, "folder");
+  const sectionChoice = offered(req, res, "section");
+
+  // Without a bucket and a kind there is no sort: the email stays unsorted, as when the model fails.
+  if (!BUCKETS.includes(bucketChoice as Bucket) || !CATEGORIES.includes(categoryChoice as Category))
+    throw new Error("The decision model didn't pick from the options it was given.");
+  const bucket = bucketChoice as Bucket;
+  const category = categoryChoice as Category;
 
   const bucketProbs = Object.fromEntries(
-    BUCKETS.map((b) => [b, bucket.probabilities[b] ?? 0]),
+    BUCKETS.map((b) => [b, (a.bucket as ChoiceAnswer).probabilities[b] ?? 0]),
   ) as Record<Bucket, number>;
 
   let suggestion: Triage["folder"];
-  if (folder && folder.choice !== STAY) {
+  if (folderChoice && folderChoice !== STAY) {
     suggestion = {
-      folderId: folder.choice,
-      probability: folder.confidence,
+      folderId: folderChoice,
+      probability: (a.folder as ChoiceAnswer).confidence,
       evidence: habit
-        ? { filed: habit.byFolder[folder.choice] ?? 0, total: habit.total }
+        ? { filed: habit.byFolder[folderChoice] ?? 0, total: habit.total }
         : undefined,
     };
   }
 
   return {
     emailId: email.id,
-    bucket: consistentBucket({ bucket: bucket.choice as Bucket, category: category.choice as Category }),
+    bucket: consistentBucket({ bucket, category }),
     bucketProbs,
-    category: category.choice as Category,
+    category,
     urgency: urgency.score,
     needsReply: reply.noul,
     folder: suggestion,
-    section: section && section.choice !== NO_SECTION ? section.choice : undefined,
+    section: sectionChoice && sectionChoice !== NO_SECTION ? sectionChoice : undefined,
     sectionsKey: sectionsKey(sections, email.accountId) || undefined,
     model: res.model,
   };

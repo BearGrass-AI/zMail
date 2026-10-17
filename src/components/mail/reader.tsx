@@ -32,7 +32,7 @@ import { draft, summarize } from "@/lib/ai/generative";
 import { composeHtml, composeText, inlineDataImages, sizeSignatureImages } from "@/lib/signature";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RoundButton, WithTip } from "../icon-button";
-import { BUCKET_META, CATEGORY_META } from "@/lib/meta";
+import { BUCKET_META, categoryMeta } from "@/lib/meta";
 import { SenderAvatar, readerDate, recipientNames } from "../meta";
 import { useEmailActions } from "../email-actions";
 import { EmailBody, useLightForced, useWouldRenderDark } from "./email-body";
@@ -453,7 +453,7 @@ export function Reader() {
                   >
                     {BUCKET_META[bucket].label}
                   </span>·
-                  <span>{CATEGORY_META[category ?? t.category].label}</span>
+                  <span>{categoryMeta(category ?? t.category).label}</span>
                   {t.needsReply > 0.5 && <>· <span>reply expected</span></>}
                 </div>
               )}
