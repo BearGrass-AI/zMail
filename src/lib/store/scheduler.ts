@@ -8,6 +8,7 @@ import { HttpError } from "@/lib/transport";
 import { INSTANCE_ID, LATE_MS, OUTLOOK_SERVER_HOLD, claimedElsewhere, dueNow, validSendAt, whenLabel, type ScheduledSend } from "@/lib/mail/scheduled";
 import { useMail } from "@/lib/store";
 import { providerFor } from "./providers";
+import { forgetDraftSignatures } from "./draft-signatures";
 import type { MailState } from "./types";
 
 export const SCHEDULED_KEY = "scheduled.v1";
@@ -69,6 +70,12 @@ export function releaseEditing(draftId: string | undefined) {
 function dropRows(ids: string[]) {
   const gone = new Set(ids);
   useMail.setState((s) => ({ emails: s.emails.filter((e) => !gone.has(e.id)) }));
+}
+
+/** A scheduled draft went out: its rows go, and so does what zMail remembered about its signature. */
+function dropSent(r: ScheduledSend) {
+  dropRows([r.draftId, r.messageId]);
+  useMail.setState((s) => ({ draftSignatures: forgetDraftSignatures(s.draftSignatures, r.accountId, [r.draftId, r.messageId]) }));
 }
 
 /** A recipient's display name when mail in the store knows it, else the address. */
@@ -178,7 +185,7 @@ export function scheduledActions(
         scheduledInFlight.delete(id);
       }
       setScheduled((list) => list.filter((x) => x.id !== id));
-      dropRows([r.draftId, r.messageId]);
+      dropSent(r);
       toast.success("Sent");
     },
 
@@ -268,7 +275,7 @@ export function scheduledActions(
             if (!p.sendSavedDraft) throw new Error("This account can't send saved drafts");
             await p.sendSavedDraft(r.draftId);
             setScheduled((list) => list.filter((x) => x.id !== r.id));
-            dropRows([r.draftId, r.messageId]);
+            dropSent(r);
             (Date.now() - r.sendAt > LATE_MS ? late : onTime).push(r);
           } catch (err) {
             if (err instanceof HttpError && err.status === 404) {

@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 // A draft saved with a rich image signature comes back with that signature when reopened (Gmail and Outlook),
-// and saving it again sends the image as an inline part. Drafts without zMail's signature marker open as before.
+// and saving it again sends the image as an inline part. Drafts without zMail's signature marker open as before,
+// and so does a draft whose marked block zMail didn't save there itself (someone else's, quoted by another app).
 import { createElement, act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Account, Email, Folder } from "@/lib/types";
 import type { EmbeddedImage, MailProvider, SendRequest } from "@/lib/mail/provider";
+import type { DraftSignature } from "@/lib/store/types";
 import { buildMime, inlineParts, messageToEmail as gmailToEmail, type GMessage, type GPart } from "@/lib/google/gmail-map";
 import { messageToEmail as graphToEmail, toGraphMessage, type GAttachment, type GFileAttachment } from "@/lib/microsoft/graph-map";
 
@@ -50,7 +52,9 @@ const { providers } = await import("@/lib/store/providers");
 const { Composer } = await import("@/components/mail/composer");
 const { GraphProvider } = await import("@/lib/microsoft/graph");
 const { HttpError } = await import("@/lib/transport");
-const { browserImageTools, sanitizeSignature, withoutRemoteLoads } = await import("@/lib/signature");
+const { browserImageTools, sanitizeSignature, signatureFingerprint, splitSavedSignature, withoutRemoteLoads } = await import("@/lib/signature");
+const { DRAFT_SIGNATURES_CAP, rememberDraftSignature, validDraftSignatures } = await import("@/lib/store/draft-signatures");
+const { snapshot } = await import("@/lib/store/persistence");
 
 const LOGO = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const SIGNATURE = {
@@ -105,7 +109,8 @@ function gmailFake(account: Account) {
   return { p, saved, messageId: () => `gm${n}` };
 }
 
-function graphFake(account: Account) {
+/** `reserialise`: like Exchange can, the body comes back with line breaks between tags and its styles respaced. */
+function graphFake(account: Account, reserialise = false) {
   const saved: SendRequest[] = [];
   let html = "";
   let atts: (GAttachment & { contentId?: string })[] = [];
@@ -116,8 +121,9 @@ function graphFake(account: Account) {
     saveDraft: async (msg, draftId) => {
       saved.push(msg);
       const m = toGraphMessage(msg);
+      const body = m.body.content.replace(/\sdata-[\w-]+(="[^"]*")?/g, "");
       // Exchange stores the body in its own document (and doesn't promise to keep custom data- attributes).
-      html = `<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><style type="text/css" style="display:none">P {margin-top:0;margin-bottom:0;}</style></head><body dir="ltr">${m.body.content.replace(/\sdata-[\w-]+(="[^"]*")?/g, "")}</body></html>`;
+      html = `<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><style type="text/css" style="display:none">P {margin-top:0;margin-bottom:0;}</style></head><body dir="ltr">${reserialise ? body.replace(/></g, ">\r\n<").replace(/:\s*/g, ":").replace(/;\s*/g, "; ") : body}</body></html>`;
       atts = m.attachments.map((a, i) => ({ id: `att${i}`, name: a.name, contentType: a.contentType, size: a.contentBytes.length, isInline: a.isInline, contentId: a.contentId, contentBytes: a.contentBytes }));
       return { draftId: draftId ?? "od1", messageId: draftId ?? "od1" };
     },
@@ -157,6 +163,7 @@ beforeEach(() => {
     composeView: null,
     signatures: [SIGNATURE],
     signatureDefaults: { g: { new: "s1", reply: "s1" }, o: { new: "s1", reply: "s1" } },
+    draftSignatures: [],
   });
 });
 afterEach(() => {
@@ -168,6 +175,7 @@ afterEach(() => {
 describe.each([
   ["Gmail", gmail, gmailFake],
   ["Outlook", outlook, graphFake],
+  ["re-serialised Outlook", outlook, (a: Account) => graphFake(a, true)],
 ] as const)("reopening a %s draft saved with an image signature", (_name, account, fake) => {
   it("restores the rich signature with its image, and the next save sends the image inline", async () => {
     const f = fake(account);
@@ -207,6 +215,12 @@ describe.each([
   });
 });
 
+/** As if zMail had saved draft m1 with the signature block `html` holds (or, given, with `block` instead). */
+function savedByZmail(account: Account, html: string, block?: string, draftId = "m1") {
+  const fingerprint = signatureFingerprint(block ?? splitSavedSignature(html)!.signature);
+  useMail.setState((s) => ({ draftSignatures: rememberDraftSignature(s.draftSignatures, { accountId: account.id, draftId, messageId: draftId, fingerprint }) }));
+}
+
 /** Open a draft whose stored HTML is `html`, with a provider that has no inline parts. */
 async function openStored(account: Account, html: string, extra: Partial<MailProvider> = {}) {
   const p = fakeProvider({ account, draftIdFor: async (id) => id, forgetDraftQuote: () => {}, inlineImages: vi.fn(async () => []), ...extra });
@@ -230,12 +244,12 @@ describe("drafts without zMail's signature marker", () => {
 
 describe("a marked signature block from the server", () => {
   it("is sanitized: no script or handlers, and its remote images aren't loaded in the composer", async () => {
-    const { c } = await openStored(
-      gmail,
+    const html =
       `<div>Body text</div><br><div class="zmail-signature"><script>alert(1)</script>` +
-        `<img src="x" onerror="alert(2)"><img src="https://tracker.example/p.png" width="1" height="1">` +
-        `<div style="background-image: url(https://tracker.example/bg.png)">Alex</div><a href="javascript:alert(3)">link</a></div>`,
-    );
+      `<img src="x" onerror="alert(2)"><img src="https://tracker.example/p.png" width="1" height="1">` +
+      `<div style="background-image: url(https://tracker.example/bg.png)">Alex</div><a href="javascript:alert(3)">link</a></div>`;
+    savedByZmail(gmail, html);
+    const { c } = await openStored(gmail, html);
     expect(c.prefill!.body).toBe("<div>Body text</div>");
     expect(c.signatureHtml).toContain("Alex");
     expect(c.signatureHtml).not.toMatch(/<script|onerror|javascript:|src="x"/i);
@@ -250,7 +264,9 @@ describe("a marked signature block from the server", () => {
     const saved: SendRequest[] = [];
     const measure = vi.spyOn(browserImageTools, "naturalSize").mockResolvedValue(null);
     try {
-      await openStored(gmail, `<div>Body text</div><br><div class="zmail-signature"><img src="https://tracker.example/p.png"><b>Alex</b></div>`, {
+      const html = `<div>Body text</div><br><div class="zmail-signature"><img src="https://tracker.example/p.png"><b>Alex</b></div>`;
+      savedByZmail(gmail, html);
+      await openStored(gmail, html, {
         saveDraft: async (msg) => (saved.push(msg), { draftId: "d1", messageId: "m1" }),
       });
       await act(async () => saveButton().click());
@@ -264,7 +280,9 @@ describe("a marked signature block from the server", () => {
   it("opens its links in the browser, never in the app window", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     try {
-      await openStored(gmail, `<div>Body text</div><br><div class="zmail-signature"><a href="https://phish.example/login"><b>Sign in</b></a></div>`);
+      const html = `<div>Body text</div><br><div class="zmail-signature"><a href="https://phish.example/login"><b>Sign in</b></a></div>`;
+      savedByZmail(gmail, html);
+      await openStored(gmail, html);
       const ev = new MouseEvent("click", { bubbles: true, cancelable: true });
       await act(async () => void preview()!.querySelector("b")!.dispatchEvent(ev));
       expect(ev.defaultPrevented).toBe(true);
@@ -292,6 +310,95 @@ describe("a marked signature block from the server", () => {
     expect(c.signatureHtml).toBeUndefined();
     expect(c.prefill!.body).toContain("Alex");
     expect(c.prefill!.body).toContain("Earlier message");
+  });
+
+  it("can't position itself over the app in the composer preview", async () => {
+    const html =
+      `<div>Body text</div><br><div class="zmail-signature"><div style="position: fixed; inset: 0; z-index: 2147483647; color: navy">Alex</div>` +
+      `<a href="https://phish.example/login" style="position:absolute;top:0;left:0">Rivera</a></div>`;
+    savedByZmail(gmail, html);
+    const { c } = await openStored(gmail, html);
+    expect(c.signatureHtml).toContain("Alex");
+    const shown = preview()!;
+    expect(shown.innerHTML).not.toMatch(/position|inset|z-index|top:|left:/i);
+    expect(shown.querySelector("div")!.style.color).toBe("navy");
+  });
+});
+
+// Classic Outlook for Windows quotes a reply's original under an id-less border-top divider, with no blockquote,
+// so position alone can't tell a block quoted from someone else's email from the one zMail saved.
+describe("a marked signature block zMail didn't save in that draft", () => {
+  const PLANTED = `<div class="zmail-signature"><img src="https://tracker.example/p.png"><a href="https://phish.example/login">Ann, Registrar</a></div>`;
+  const CLASSIC_OUTLOOK =
+    `<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"></head><body lang="EN-US"><div class="WordSection1">` +
+    `<p class="MsoNormal">Sounds good.</p><p class="MsoNormal">&nbsp;</p>` +
+    `<div style="border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt 0in 0in 0in"><p class="MsoNormal"><b>From:</b> Ann &lt;ann@example.com&gt;<br><b>Subject:</b> Budget</p></div>` +
+    `<p class="MsoNormal">Earlier message</p>${PLANTED}</div></body></html>`;
+
+  it("isn't restored as the user's signature from a reply drafted in classic Outlook", async () => {
+    const { c } = await openStored(outlook, CLASSIC_OUTLOOK, { keepDraftQuote: () => {} });
+    expect(c.signatureHtml).toBeUndefined();
+    expect(preview()).toBeNull();
+    // The whole draft is the body, as for any draft from another app.
+    expect(c.prefill!.body).toContain("Sounds good.");
+    expect(c.prefill!.body).toContain("Earlier message");
+    expect(c.prefill!.body).toContain("Ann, Registrar");
+  });
+
+  it("isn't restored when zMail saved that draft with a different block", async () => {
+    savedByZmail(outlook, CLASSIC_OUTLOOK, "");
+    const { c } = await openStored(outlook, CLASSIC_OUTLOOK, { keepDraftQuote: () => {} });
+    expect(c.signatureHtml).toBeUndefined();
+  });
+
+  it("isn't restored when zMail saved that block in a different draft", async () => {
+    savedByZmail(outlook, CLASSIC_OUTLOOK, undefined, "other");
+    const { c } = await openStored(outlook, CLASSIC_OUTLOOK, { keepDraftQuote: () => {} });
+    expect(c.signatureHtml).toBeUndefined();
+  });
+});
+
+describe("what zMail remembers about the drafts it saved", () => {
+  const entry = (n: number) => ({ accountId: "g", draftId: `d${n}`, messageId: `m${n}`, fingerprint: "a".repeat(64) });
+
+  it("keeps the newest drafts up to the cap, one entry per draft", () => {
+    let list = Array.from({ length: DRAFT_SIGNATURES_CAP + 1 }, (_, i) => entry(i)).reduce((l, e) => rememberDraftSignature(l, e), [] as DraftSignature[]);
+    expect(list).toHaveLength(DRAFT_SIGNATURES_CAP);
+    expect(list.some((r) => r.draftId === "d0")).toBe(false);
+    // Saved again (Gmail's new message id): moved to the newest, not added twice.
+    list = rememberDraftSignature(list, { ...entry(5), messageId: "m5b" });
+    expect(list.filter((r) => r.draftId === "d5")).toEqual([{ ...entry(5), messageId: "m5b" }]);
+    expect(list.at(-1)!.draftId).toBe("d5");
+    // Saved over a draft that had gone: the old one is forgotten.
+    list = rememberDraftSignature(list, entry(9000), "d7");
+    expect(list.some((r) => r.draftId === "d7")).toBe(false);
+  });
+
+  it("reads back only well-formed entries, at most the cap", () => {
+    const raw = [null, 7, { accountId: "g", draftId: "d", messageId: "m", fingerprint: "nope" }, { accountId: "g", draftId: "", messageId: "m", fingerprint: "a".repeat(64) }, entry(1)];
+    expect(validDraftSignatures(raw)).toEqual([entry(1)]);
+    expect(validDraftSignatures({})).toEqual([]);
+    expect(validDraftSignatures(Array.from({ length: DRAFT_SIGNATURES_CAP + 50 }, (_, i) => entry(i)))).toHaveLength(DRAFT_SIGNATURES_CAP);
+  });
+
+  it("is saved with the rest of the state, within the cap", () => {
+    useMail.setState({ draftSignatures: Array.from({ length: DRAFT_SIGNATURES_CAP + 3 }, (_, i) => entry(i)) });
+    expect(snapshot(useMail.getState()).draftSignatures).toHaveLength(DRAFT_SIGNATURES_CAP);
+  });
+
+  it("forgets a draft once it's deleted or sent", async () => {
+    providers.set(gmail.id, fakeProvider({ account: gmail, deleteDraft: async () => {}, sendDraft: async () => {} }));
+    useMail.setState({ draftSignatures: [entry(1), entry(2), entry(3)] });
+    await useMail.getState().deleteDraft("g", "d1", "m1");
+    await useMail.getState().sendDraft("g", { to: [], subject: "", text: "" }, "d2");
+    expect(useMail.getState().draftSignatures).toEqual([entry(3)]);
+  });
+
+  it("remembers a draft only after the provider saved it", async () => {
+    providers.set(gmail.id, fakeProvider({ account: gmail, saveDraft: async () => Promise.reject(new Error("offline")) }));
+    const msg = { to: [], subject: "", text: "", html: `<div>Hi</div><div class="zmail-signature"><b>Alex</b></div>` } satisfies SendRequest;
+    await expect(useMail.getState().saveDraft("g", msg)).rejects.toThrow("offline");
+    expect(useMail.getState().draftSignatures).toEqual([]);
   });
 });
 
@@ -348,11 +455,11 @@ describe("CSS in a server signature that would load something remote", () => {
   });
 
   it("isn't fetched by the composer preview of a reopened draft", async () => {
-    const { c } = await openStored(
-      gmail,
+    const html =
       `<div>Body text</div><br><div class="zmail-signature"><div style="background:\\75rl(https://x.example/p.png); color: navy">Alex</div>` +
-        `<div style='background-image:image-set("https://x.example/q.png" 1x)'>Rivera</div></div>`,
-    );
+      `<div style='background-image:image-set("https://x.example/q.png" 1x)'>Rivera</div></div>`;
+    savedByZmail(gmail, html);
+    const { c } = await openStored(gmail, html);
     // Kept for sending as the user saved it; only the preview is filtered.
     expect(c.signatureHtml).toContain("x.example");
     const shown = preview()!;

@@ -3,6 +3,7 @@
 // travel as inline (cid:) parts instead of data: URIs that many clients block.
 
 import DOMPurify from "dompurify";
+import { sha256Hex } from "@/lib/sha256";
 
 export interface MailSignature {
   id: string;
@@ -24,12 +25,31 @@ export interface InlineImage {
   base64: string;
 }
 
+/**
+ * The text with every span from `open` to the first `close` after it cut out, like a lazy
+ * replace(/open[\s\S]*?close/g) but in one pass: that regex scans to the end of the text again
+ * for each opener that never closes, which freezes on a block full of them.
+ */
+function cutBetween(text: string, open: RegExp, close: RegExp): string {
+  let out = "";
+  let at = 0;
+  for (;;) {
+    open.lastIndex = at;
+    const o = open.exec(text);
+    if (!o) break;
+    close.lastIndex = o.index + o[0].length;
+    const c = close.exec(text);
+    // No close after this opener means none after any later one either.
+    if (!c) break;
+    out += text.slice(at, o.index);
+    at = c.index + c[0].length;
+  }
+  return out + text.slice(at);
+}
+
 /** Strip anything active but keep the tables and inline styles signatures depend on. */
 export function sanitizeSignature(html: string): string {
-  const stripped = html
-    .replace(/<!--\[if[\s\S]*?<!\[endif\]-->/gi, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<\/?o:p>/gi, "");
+  const stripped = cutBetween(cutBetween(html, /<!--\[if/gi, /<!\[endif\]-->/gi), /<!--/g, /-->/g).replace(/<\/?o:p>/gi, "");
   const clean = DOMPurify.sanitize(stripped, {
     FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form", "input", "button", "textarea", "select", "meta", "link", "base", "title"],
     FORBID_ATTR: ["onerror", "onload", "onclick", "srcset", "id", "contenteditable"],
@@ -145,6 +165,34 @@ export function splitSavedSignature(html: string): { body: string; signature: st
 }
 
 /**
+ * A digest of a signature block's contents (its inner HTML), to tell later whether a draft still
+ * holds the block zMail saved in it. Exchange re-serialises a draft's HTML (line breaks between
+ * tags, attribute quoting and order, style spacing, dropped data- attributes), so markup and styles
+ * aren't compared. What is: the text with all whitespace removed (nbsp too), and in order with it
+ * every image's src and every link's href. Someone else's block can only pass by carrying the same
+ * words, images and links, and it still has to be in a draft zMail itself saved.
+ */
+export function signatureFingerprint(blockHtml: string): string {
+  const doc = new DOMParser().parseFromString(`<body>${blockHtml}</body>`, "text/html");
+  const parts: string[] = [];
+  let text = "";
+  const walk = (n: Node) => {
+    if (n.nodeType === Node.TEXT_NODE) return void (text += (n.textContent ?? "").replace(/\s/g, ""));
+    if (n.nodeType !== Node.ELEMENT_NODE) return;
+    const el = n as Element;
+    const ref = el.localName === "img" ? el.getAttribute("src") : el.localName === "a" ? el.getAttribute("href") : null;
+    if (ref !== null) {
+      parts.push(text, `${el.localName}:${ref.trim()}`);
+      text = "";
+    }
+    el.childNodes.forEach(walk);
+  };
+  walk(doc.body);
+  parts.push(text);
+  return sha256Hex(JSON.stringify(parts));
+}
+
+/**
  * A reopened draft's signature, kept to what the signature editor allows, with its
  * cid: images turned back into data: URIs from the draft's inline parts (so the next
  * save inlines them again). Images whose part is missing are dropped.
@@ -182,10 +230,26 @@ export function restoreSignature(html: string, images: Pick<InlineImage, "cid" |
  */
 const REMOTE_CSS = /\\|url|image-set|image\s*\(|@import|src\s*\(/i;
 
+/** Properties that could lift markup out of the preview's box and over the app (position: fixed and friends). */
+const PLACEMENT_CSS = /^(position|inset(-[a-z-]*)?|top|right|bottom|left|z-index)$/i;
+
 /**
- * For showing signature HTML that came from a server: nothing in it loads from the network.
- * Declarations that might load are dropped one by one, so the colours and fonts around them
- * stay. What's left can't spell a loading function across a ";" since none of them contain one.
+ * Whether a declaration stays in a server signature's preview: it can't load anything, doesn't
+ * place the element, and starts with a plain property name. That last part also drops a name
+ * hidden behind a comment ("/*;*\/position: fixed") instead of trying to read past it.
+ */
+function previewSafe(declaration: string): boolean {
+  if (!declaration.trim()) return true;
+  if (REMOTE_CSS.test(declaration)) return false;
+  const name = /^\s*([\w-]+)\s*:/.exec(declaration)?.[1];
+  return !!name && !PLACEMENT_CSS.test(name);
+}
+
+/**
+ * For showing signature HTML that came from a server: nothing in it loads from the network
+ * or positions itself over the app. Those declarations are dropped one by one, so the colours
+ * and fonts around them stay. What's left can't spell a loading function across a ";" since
+ * none of them contain one.
  */
 export function withoutRemoteLoads(html: string): string {
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
@@ -197,8 +261,9 @@ export function withoutRemoteLoads(html: string): string {
       if (v !== null && !/^\s*(data:|#)/i.test(v)) el.removeAttribute(name);
     }
     const style = el.getAttribute("style");
-    if (style && REMOTE_CSS.test(style)) {
-      const kept = style.split(";").filter((d) => !REMOTE_CSS.test(d));
+    const declarations = style?.split(";") ?? [];
+    const kept = declarations.filter(previewSafe);
+    if (kept.length < declarations.length) {
       if (kept.some((d) => d.trim())) el.setAttribute("style", kept.join(";"));
       else el.removeAttribute("style");
     }
@@ -218,9 +283,14 @@ export interface Size {
 const MAX_IMAGE_WIDTH = 200;
 const PT_TO_PX = 4 / 3;
 
+/** Longer than any real length: a huge attribute from someone else's HTML is turned away before a regex reads it. */
+const MAX_LENGTH_TEXT = 64;
+
 /** A CSS length in px: pt is ×4/3, px or unitless as is; anything else (%, em, auto) is unknown. */
 export function cssLengthPx(v: string | null | undefined): number | null {
-  const m = /^\s*(\d*\.?\d+)\s*(pt|px)?\s*$/i.exec(v ?? "");
+  const t = (v ?? "").trim();
+  // Each digit can match only one way (unlike \d*\.?\d+), so a long run of them can't backtrack.
+  const m = t.length <= MAX_LENGTH_TEXT ? /^(\d+(?:\.\d+)?|\.\d+)\s*(pt|px)?$/i.exec(t) : null;
   if (!m) return null;
   const n = parseFloat(m[1]);
   if (!(n > 0)) return null;
