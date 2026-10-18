@@ -24,7 +24,41 @@ const CITE = /\[(m\d+)\]/;
 const CITE_G = /\[(m\d+)\]/g;
 const NUMERIC = /^[+-]?[\d,.]+%?$/;
 
-/** Tag numeric table columns and unwrap mailto links on the sanitized DOM (no re-parse). */
+/** The host a link's text reads as, when it is one URL or bare domain ("www.example.com"); else null. */
+function hostIn(text: string): string | null {
+  const t = text.trim();
+  if (!t || /\s/.test(t)) return null;
+  try {
+    const u = new URL(/^[a-z][a-z\d+.-]*:/i.test(t) ? t : `https://${t}`);
+    // "bank.example@attacker.example" names a host it doesn't go to.
+    return u.username || u.password ? null : u.hostname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A reply's links are model-written, and an email the model read can steer both the text and the
+ * URL (which may carry mail content in its query). So each http(s) link shows its real host after
+ * the text, unless the text already reads as that host (a bare URL isn't doubled), and the full URL
+ * on hover. A look-alike (punycode) host is always shown in its plain form.
+ */
+function showDestination(a: Element, href: string) {
+  let host: string;
+  try {
+    const u = new URL(href);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return;
+    host = u.hostname;
+  } catch {
+    return;
+  }
+  a.setAttribute("title", href);
+  const text = a.textContent ?? "";
+  if (!host.includes("xn--") && hostIn(text) === host) return;
+  a.append(a.ownerDocument.createTextNode(text.trim() ? ` (${host})` : host));
+}
+
+/** Tag numeric table columns, show link destinations and unwrap mailto links on the sanitized DOM (no re-parse). */
 function polish(root: HTMLElement, refs?: Record<string, RefInfo>): { html: string; cited: string[] } {
   const cited: string[] = [];
   const doc = root.ownerDocument;
@@ -57,7 +91,10 @@ function polish(root: HTMLElement, refs?: Record<string, RefInfo>): { html: stri
   }
   for (const a of Array.from(root.querySelectorAll("a[href]"))) {
     const href = a.getAttribute("href") ?? "";
-    if (!/^mailto:/i.test(href)) continue;
+    if (!/^mailto:/i.test(href)) {
+      showDestination(a, href);
+      continue;
+    }
     let addr = href.replace(/^mailto:/i, "").split("?")[0];
     try {
       addr = decodeURIComponent(addr);

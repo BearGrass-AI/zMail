@@ -102,7 +102,13 @@ export function trashMeanwhile(id: string) {
 function detail(card: UnsubCard) {
   const host = card.http ? hostOf(card.http) : "";
   if (card.method === "one_click") return `Asks ${host} to stop sending you mail.`;
-  if (card.method === "email") return `Sends a short email to ${(card.mailto && parseMailto(card.mailto)?.to) || "the sender"} from ${card.accountAddress}.`;
+  if (card.method === "email") {
+    // The sender's header picks both the recipient and the subject, and this email goes out as the
+    // user, so the card names both exactly as they'll be sent (list servers sometimes need the subject).
+    const m = card.mailto ? parseMailto(card.mailto) : null;
+    if (!m) return `Sends a short email to the sender from ${card.accountAddress}.`;
+    return `Sends a short email to ${m.to} from ${card.accountAddress} with the subject “${m.subject}”.`;
+  }
   return `Opens ${host}'s unsubscribe page in your browser.`;
 }
 

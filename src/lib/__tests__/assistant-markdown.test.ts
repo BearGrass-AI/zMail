@@ -55,6 +55,30 @@ describe("table and link formatting", () => {
   });
 });
 
+// A reply is model output that an email it read may have steered, so a link's text can't hide where it goes.
+describe("link destinations", () => {
+  const link = (md: string) => new DOMParser().parseFromString(rm(md), "text/html").querySelector("a")!;
+  it("shows the real host after link text that doesn't name it, and the full URL on hover", () => {
+    const a = link("[View the full report](https://attacker.example/x?d=secret)");
+    expect(a.textContent).toBe("View the full report (attacker.example)");
+    expect(a.getAttribute("title")).toBe("https://attacker.example/x?d=secret");
+    expect(a.getAttribute("href")).toBe("https://attacker.example/x?d=secret");
+  });
+  it("doesn't double a bare URL or text that already names the host", () => {
+    expect(link("see https://example.com/x").textContent).toBe("https://example.com/x");
+    expect(link("see www.example.com").textContent).toBe("www.example.com");
+    expect(link("[Example.org](https://example.org/docs)").textContent).toBe("Example.org");
+  });
+  it("names the real host when the text looks like another address", () => {
+    expect(link("[https://bank.example](https://attacker.example/)").textContent).toBe("https://bank.example (attacker.example)");
+    expect(link("[https://bank.example@attacker.example](https://bank.example@attacker.example/)").textContent).toBe("https://bank.example@attacker.example (attacker.example)");
+    expect(link("[b\u0430nk.example](https://b\u0430nk.example/)").textContent).toMatch(/^b\u0430nk\.example \(xn--/);
+  });
+  it("gives an empty link its host as text", () => {
+    expect(link("[](https://example.com/x)").textContent).toBe("example.com");
+  });
+});
+
 describe("sanitizer isolation", () => {
   it("the assistant's link hook doesn't touch email bodies", () => {
     rm("[a](https://x.com)");

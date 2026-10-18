@@ -441,7 +441,9 @@ async function run(name: string, a: Record<string, unknown>, deps: ToolDeps): Pr
       if (!needsConfirm(op, refs.length) && takeDirect(refs.length)) {
         const emails = await deps.loadHeaders(refs);
         useAssistant.getState().expireUndo();
-        const res = await deps.bulk(emails, op);
+        // Text in an email can steer this uncarded path, so a lane or section change here moves only these
+        // emails; teaching the sorting model about their senders is lasting, and only a card click does it.
+        const res = await deps.bulk(emails, op, { learn: false });
         const gone = refs.length - emails.length;
         const failedRefs = res.failed.map(ref);
         // A card that's already done keeps a durable Undo in the chat; the toast is a shortcut to it.

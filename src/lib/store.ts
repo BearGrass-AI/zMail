@@ -1283,19 +1283,21 @@ export const useMail = create<MailState>()((set, get) => {
         const a = s.accounts.find((x) => x.id === id);
         return a ? (a.label ?? a.name ?? a.address) : id;
       };
+      // learn: false (the assistant's uncarded actions) changes only these emails, so Undo has no lesson to put back.
+      const teach = opts.learn !== false;
       if (op.kind === "section") {
         const lessonOf = new Map<string, Lesson>();
         for (const l of s.lessons) if ("section" in l && !lessonOf.has(l.emailId)) lessonOf.set(l.emailId, l);
-        const undo = emails.map((e) => ({ ...entry(e), section: e.id in s.sectionOverrides ? s.sectionOverrides[e.id] : undefined, sectionLesson: lessonOf.get(e.id) }));
-        get().setSection(emails.map((e) => e.id), op.sectionId);
+        const undo = emails.map((e) => ({ ...entry(e), section: e.id in s.sectionOverrides ? s.sectionOverrides[e.id] : undefined, ...(teach ? { sectionLesson: lessonOf.get(e.id) } : { untaught: true }) }));
+        get().setSection(emails.map((e) => e.id), op.sectionId, { learn: teach });
         opts.onProgress?.(emails.length, emails.length);
         return { done: emails.length, skipped: 0, failed: [], undo };
       }
       if (op.kind === "lane") {
         const lessonOf = new Map<string, Lesson>();
         for (const l of s.lessons) if ("bucket" in l && !lessonOf.has(l.emailId)) lessonOf.set(l.emailId, l);
-        const undo = emails.map((e) => ({ ...entry(e), bucket: s.overrides[e.id], bucketRuled: e.id in s.laneRuled, bucketLesson: lessonOf.get(e.id) }));
-        get().setBucket(emails.map((e) => e.id), op.lane);
+        const undo = emails.map((e) => ({ ...entry(e), bucket: s.overrides[e.id], bucketRuled: e.id in s.laneRuled, ...(teach ? { bucketLesson: lessonOf.get(e.id) } : { untaught: true }) }));
+        get().setBucket(emails.map((e) => e.id), op.lane, { learn: teach });
         opts.onProgress?.(emails.length, emails.length);
         return { done: emails.length, skipped: 0, failed: [], undo };
       }
@@ -1373,7 +1375,7 @@ export const useMail = create<MailState>()((set, get) => {
 
     async bulkUndo(undo, op) {
       if (op.kind === "section") {
-        const ids = new Set(undo.map((u) => u.id));
+        const ids = new Set(undo.filter((u) => !u.untaught).map((u) => u.id));
         set((s) => {
           const next = { ...s.sectionOverrides };
           for (const u of undo) {
@@ -1388,7 +1390,7 @@ export const useMail = create<MailState>()((set, get) => {
         return { done: undo.length, skipped: 0, failed: [], undo: [] };
       }
       if (op.kind === "lane") {
-        const ids = new Set(undo.map((u) => u.id));
+        const ids = new Set(undo.filter((u) => !u.untaught).map((u) => u.id));
         set((s) => {
           const overrides = { ...s.overrides };
           const laneRuled = { ...s.laneRuled };
@@ -1500,7 +1502,7 @@ export const useMail = create<MailState>()((set, get) => {
       set((s) => ({ dismissed: new Set([...s.dismissed, ...ids]) }));
     },
 
-    setBucket(ids, bucket) {
+    setBucket(ids, bucket, opts) {
       set((s) => {
         // A user's choice sticks: it is no longer a lane-rule override.
         const laneRuled = { ...s.laneRuled };
@@ -1508,7 +1510,7 @@ export const useMail = create<MailState>()((set, get) => {
         return {
           overrides: { ...s.overrides, ...Object.fromEntries(ids.map((id) => [id, bucket])) },
           laneRuled,
-          lessons: learn(s.lessons, s.emails, ids, { bucket }),
+          lessons: opts?.learn === false ? s.lessons : learn(s.lessons, s.emails, ids, { bucket }),
         };
       });
     },
@@ -1629,10 +1631,10 @@ export const useMail = create<MailState>()((set, get) => {
       }));
     },
 
-    setSection(ids, sectionId) {
+    setSection(ids, sectionId, opts) {
       set((s) => ({
         sectionOverrides: { ...s.sectionOverrides, ...Object.fromEntries(ids.map((id) => [id, sectionId])) },
-        lessons: learn(s.lessons, s.emails, ids, { section: sectionId }),
+        lessons: opts?.learn === false ? s.lessons : learn(s.lessons, s.emails, ids, { section: sectionId }),
       }));
       void findDates();
     },
