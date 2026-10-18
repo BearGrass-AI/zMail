@@ -3,6 +3,7 @@
 // body once.
 
 import DOMPurify from "dompurify";
+import type { MessageBackground } from "@/lib/settings";
 import { adaptEmail, dependsOnImages } from "./dark-adapt";
 
 const DARK_RULE = /\(\s*prefers-color-scheme\s*:\s*dark\s*\)/i;
@@ -144,6 +145,16 @@ function hasLinkColors(clean: string) {
 /** Would this HTML render dark in dark mode (its own dark design, no colors of its own, or adapted)? */
 export function canRenderDark(raw: string) {
   return darkFor(sanitizedFor(raw));
+}
+
+/**
+ * Warm what showing an email not yet opened will need. The dark decision runs the
+ * adapter, the costliest step on hostile mail, so it's only made when the email would
+ * show dark: the app is dark and messages follow the theme.
+ */
+export function warmRender(raw: string, appDark: boolean, background: MessageBackground) {
+  const clean = sanitizedFor(raw);
+  if (appDark && background === "theme") darkKindFor(clean);
 }
 
 /**

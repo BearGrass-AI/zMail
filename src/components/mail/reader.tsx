@@ -36,7 +36,8 @@ import { BUCKET_META, categoryMeta } from "@/lib/meta";
 import { SenderAvatar, readerDate, recipientNames } from "../meta";
 import { useEmailActions } from "../email-actions";
 import { EmailBody, useLightForced, useWouldRenderDark } from "./email-body";
-import { canRenderDark } from "@/lib/mail/dark-mode";
+import { warmRender } from "@/lib/mail/dark-mode";
+import { useAppDark } from "@/lib/theme";
 import { isSingleMailbox } from "@/lib/mail/address";
 import { AttachmentStrip } from "./attachments";
 import { bucketOf, categoryOf } from "@/lib/store";
@@ -372,15 +373,17 @@ export function Reader() {
   }, [emailId]);
 
   // Once the open email is readable, warm the next two and the previous one.
+  const appDark = useAppDark();
+  const background = useSettings((s) => s.messageBackground);
   useEffect(() => {
     if (!emailId || trimmed) return;
     const timer = setTimeout(() => {
       const s = useMail.getState();
       for (const id of neighborsOf(orderedEmails(s).map((e) => e.id), emailId))
-        void s.ensureBody(id).then((e) => e?.html && canRenderDark(e.html)).catch(() => undefined);
+        void s.ensureBody(id).then((e) => e?.html && warmRender(e.html, appDark, background)).catch(() => undefined);
     }, 150);
     return () => clearTimeout(timer);
-  }, [emailId, trimmed]);
+  }, [emailId, trimmed, appDark, background]);
 
   return (
     <section className="flex h-full min-w-0 flex-col">
