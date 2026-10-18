@@ -30,6 +30,10 @@ const MAX_ADAPT_ELEMENTS = 20_000;
 const MAX_VALUE = 4_000;
 const MAX_SELECTORS = 3_000;
 const MAX_MATCH_WORK = 4_000_000;
+/** Longer selectors aren't matched or scored: real ones are well under 200 characters. */
+const MAX_SELECTOR = 2_000;
+/** Style attribute and style block text, all told, bounding the work per email; real mail's styling is a small share of this. */
+const MAX_STYLE_CHARS = 500_000;
 /** Share of the email's text sitting on background images past which it stays light. */
 const IMAGE_TEXT_SHARE = 0.4;
 
@@ -53,12 +57,46 @@ function roleOf(prop: string, hr = false): Role | null {
 
 // ---- Values ----
 
-const URL_PART = /(url\(\s*(?:"[^"]*"|'[^']*'|[^)]*)\))/i;
 const COLOR_TOKEN = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\([^()]{0,100}\)|\b[a-z]{3,20}\b/gi;
+
+/**
+ * Split a value around its url() tokens, the url()s at odd indexes: what
+ * value.split(/(url\(\s*(?:"[^"]*"|'[^']*'|[^)]*)\))/i) gives, found by index. That
+ * pattern's \s* and [^)]* both took the spaces of an unclosed "url(   x", so it
+ * tried every split of them, quadratic in the value's length.
+ */
+function splitUrls(value: string): string[] {
+  const out: string[] = [];
+  const open = /url\(/gi;
+  const spaces = /\s*/y;
+  let last = 0;
+  for (let m = open.exec(value); m; m = open.exec(value)) {
+    spaces.lastIndex = m.index + 4;
+    spaces.exec(value);
+    const at = spaces.lastIndex;
+    let end = -1;
+    const quote = value[at];
+    if (quote === '"' || quote === "'") {
+      const close = value.indexOf(quote, at + 1);
+      if (close >= 0 && value[close + 1] === ")") end = close + 2;
+    }
+    if (end < 0) {
+      const paren = value.indexOf(")", at);
+      // No ")" left, so no later url( can close either.
+      if (paren < 0) break;
+      end = paren + 1;
+    }
+    out.push(value.slice(last, m.index), value.slice(m.index, end));
+    last = end;
+    open.lastIndex = end;
+  }
+  out.push(value.slice(last));
+  return out;
+}
 
 /** The first color in a CSS value (outside url()), or null. */
 function firstColor(value: string): Rgba | null {
-  for (const [i, part] of value.split(URL_PART).entries()) {
+  for (const [i, part] of splitUrls(value).entries()) {
     if (i % 2 === 1) continue;
     for (const m of part.matchAll(COLOR_TOKEN)) {
       const c = parseColor(m[0]);
@@ -71,8 +109,7 @@ function firstColor(value: string): Rgba | null {
 /** Rewrite each color in `value` (url() untouched). Returns the value as is when nothing parses. */
 function mapValue(value: string, map: (c: Rgba) => Rgba): string {
   if (value.length > MAX_VALUE) return value;
-  return value
-    .split(URL_PART)
+  return splitUrls(value)
     .map((part, i) =>
       i % 2 === 1
         ? part
@@ -87,7 +124,8 @@ function mapValue(value: string, map: (c: Rgba) => Rgba): string {
 const hasUrl = (value: string) => /url\(/i.test(value);
 // prepareHtml blanks every inline url() when remote images are off; style blocks keep data: URLs.
 const urlLoads = (value: string, allowImages: boolean, inline: boolean) => {
-  const m = /url\(\s*["']?\s*([^"')\s]*)/i.exec(value);
+  // One \s* per run of spaces: two around an optional quote could share a run.
+  const m = /url\(\s*(?:["']\s*)?([^"')\s]*)/i.exec(value);
   if (!m) return false;
   if (inline) return allowImages && /^(https?:|data:|\/\/)/i.test(m[1]);
   return /^data:/i.test(m[1]) || (allowImages && /^(https?:|\/\/)/i.test(m[1]));
@@ -295,10 +333,33 @@ function splitSelectors(sel: string) {
   return out.map((s) => s.trim()).filter(Boolean);
 }
 
-function specificity(sel: string) {
+const WORD = /[\w-]/;
+
+/**
+ * A selector's specificity as ids, classes (with attributes and pseudo-classes) and
+ * types. Classes are counted in one pass, as /\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+/g
+ * counted them: that pattern rescanned the rest of the selector at every "[" with no
+ * "]" after it, quadratic on a run of escaped "\[". Exported for tests.
+ */
+export function specificity(sel: string) {
   const ids = (sel.match(/#[\w-]+/g) ?? []).length;
-  const classes = (sel.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+/g) ?? []).length;
   const types = (sel.match(/(?:^|[\s>+~(])[a-z][\w-]*/gi) ?? []).length;
+  let classes = 0;
+  // Past the last "]", no "[" can close.
+  const lastClose = sel.lastIndexOf("]");
+  const n = sel.length;
+  let i = 0;
+  while (i < n) {
+    const ch = sel[i];
+    if (ch === "[" && i < lastClose) {
+      classes++;
+      i = sel.indexOf("]", i + 1) + 1;
+    } else if ((ch === "." || (ch === ":" && sel[i + 1] !== ":")) && WORD.test(sel[i + 1] ?? "")) {
+      classes++;
+      i += 2;
+      while (i < n && WORD.test(sel[i])) i++;
+    } else i++;
+  }
   return ids * 1e6 + classes * 1e3 + types;
 }
 
@@ -310,6 +371,7 @@ function matchRules(doc: Document, rules: Rule[], elementCount: number) {
   const sels = rules.flatMap((r) => splitSelectors(r.selector).map((s) => ({ s, r })));
   if (sels.length > MAX_SELECTORS || sels.length * elementCount > MAX_MATCH_WORK) return byEl;
   for (const { s, r } of sels) {
+    if (s.length > MAX_SELECTOR) continue;
     // Pseudo-elements never hold the text nodes we check.
     if (/::|:(?:before|after|first-line|first-letter)\b/i.test(s)) continue;
     let found: NodeListOf<Element>;
@@ -399,6 +461,12 @@ export function adaptEmail(clean: string, allowImages: boolean): AdaptResult {
   const doc = new DOMParser().parseFromString(`<body>${clean}</body>`, "text/html");
   const all = doc.getElementsByTagName("*");
   if (all.length > MAX_ADAPT_ELEMENTS) throw new Error("too large to adapt");
+  let styleChars = 0;
+  for (const el of all) {
+    styleChars += el.getAttribute("style")?.length ?? 0;
+    if (el.tagName === "STYLE") styleChars += el.textContent?.length ?? 0;
+  }
+  if (styleChars > MAX_STYLE_CHARS) throw new Error("too much styling to adapt");
   const rules = adaptStyleBlocks(doc, allowImages);
   const matches = matchRules(doc, rules, all.length);
   let textChars = 0;
