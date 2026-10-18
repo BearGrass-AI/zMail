@@ -40,6 +40,7 @@ import { calendarActions } from "./store/calendar-actions";
 import { folderActions } from "./store/folder-actions";
 import { SNAPSHOT_KEY, restore, startAutosave, type Snapshot } from "./store/persistence";
 import { SCHEDULED_KEY, releaseEditing, scheduledActions, setScheduled, startScheduler, withoutEditing } from "./store/scheduler";
+import { draftBlockFingerprint, forgetDraftSignatures, isOwnDraftSignature, rememberDraftSignature } from "./store/draft-signatures";
 import { applyEmailChanges, mergeByDateDesc, protectPending } from "./store/merge";
 import { ageOutIds, categoryOf, inNeedsYou, inboxFolderIds, isInbox, nextAfterRemoval, orderedEmails, repliedIds, resultsMode, sectionOf } from "./store/selectors";
 import { held } from "./store/held";
@@ -608,6 +609,7 @@ export const useMail = create<MailState>()((set, get) => {
     imageSenders: new Set(),
     signatures: [],
     signatureDefaults: {},
+    draftSignatures: [],
     sections: [],
     sectionOverrides: {},
     resolved: {},
@@ -789,7 +791,7 @@ export const useMail = create<MailState>()((set, get) => {
         delete autoReplies[id];
         delete accountStatus[id];
         delete backfill[id];
-        return { autoReplies, accountStatus, backfill };
+        return { autoReplies, accountStatus, backfill, draftSignatures: s.draftSignatures.filter((r) => r.accountId !== id) };
       });
       // Its schedules can't send any more (and must not if the account is added back).
       const n = get().scheduled.filter((r) => r.accountId === id).length;
@@ -838,7 +840,19 @@ export const useMail = create<MailState>()((set, get) => {
     async saveDraft(accountId, msg, draftId) {
       const p = providerFor(accountId);
       if (!p.saveDraft) throw new Error("This account can't save drafts");
+      const fingerprint = draftBlockFingerprint(msg.html);
       const res = await p.saveDraft(msg, draftId);
+      // Vouches for the signature block just saved, so reopening this draft gives it back (and no one else's).
+      // Not for an account removed while the save ran: its entries are gone and stay gone.
+      set((s) =>
+        s.accounts.some((a) => a.id === accountId)
+          ? {
+              draftSignatures: fingerprint
+                ? rememberDraftSignature(s.draftSignatures, { accountId, draftId: res.draftId, messageId: res.messageId, fingerprint }, draftId)
+                : forgetDraftSignatures(s.draftSignatures, accountId, [res.draftId, res.messageId, draftId]),
+            }
+          : {},
+      );
       // Gmail gives each save a new message id: keep a schedule's pointing at the live one.
       if (get().scheduled.some((r) => r.draftId === res.draftId && r.messageId !== res.messageId))
         setScheduled((l) => l.map((r) => (r.draftId === res.draftId ? { ...r, messageId: res.messageId } : r)));
@@ -854,7 +868,7 @@ export const useMail = create<MailState>()((set, get) => {
       if (get().scheduled.some((r) => r.draftId === draftId)) setScheduled((l) => l.filter((r) => r.draftId !== draftId));
       // Gmail's draft id differs from its message id; the composer's draft email is dropped by either.
       const gone = new Set([draftId, get().compose?.draft?.emailId]);
-      set((s) => ({ emails: s.emails.filter((e) => !gone.has(e.id)) }));
+      set((s) => ({ emails: s.emails.filter((e) => !gone.has(e.id)), draftSignatures: forgetDraftSignatures(s.draftSignatures, accountId, [draftId]) }));
     },
 
     async deleteDraft(accountId, draftId, messageId) {
@@ -864,7 +878,7 @@ export const useMail = create<MailState>()((set, get) => {
       // Nothing left to send.
       if (get().scheduled.some((r) => r.draftId === draftId)) setScheduled((l) => l.filter((r) => r.draftId !== draftId));
       const gone = new Set([draftId, messageId]);
-      set((s) => ({ emails: s.emails.filter((e) => !gone.has(e.id)) }));
+      set((s) => ({ emails: s.emails.filter((e) => !gone.has(e.id)), draftSignatures: forgetDraftSignatures(s.draftSignatures, accountId, [draftId, messageId]) }));
     },
 
     ...scheduledActions(set, get),
@@ -1107,7 +1121,10 @@ export const useMail = create<MailState>()((set, get) => {
         // The signature zMail saved with it keeps its own formatting and images; the body is cleaned like any body.
         // What follows the signature (a reply's quoted original) isn't edited: the provider puts it back under our
         // text on save. A provider that can't do that gets the whole draft as the body.
-        const found = e.html ? splitSavedSignature(e.html) : null;
+        const block = e.html ? splitSavedSignature(e.html) : null;
+        // Only a block zMail saved in this very draft is the user's signature. Any other (one quoted from someone
+        // else's email by an app whose quote zMail can't spot) stays in the body, like a draft from any other app.
+        const found = block && isOwnDraftSignature(get().draftSignatures, e.accountId, [id, e.id], block.signature) ? block : null;
         const split = found?.quote && !p.keepDraftQuote ? null : found;
         if (split?.quote) p.keepDraftQuote?.(id, split.quote);
         else p.forgetDraftQuote?.(id);

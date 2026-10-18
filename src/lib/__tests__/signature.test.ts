@@ -17,6 +17,7 @@ import {
   tdHeightPx,
   tdWidthPx,
   textToHtml,
+  withoutRemoteLoads,
   type ImageTools,
 } from "@/lib/signature";
 import { buildMime } from "@/lib/google/gmail-map";
@@ -401,5 +402,51 @@ describe("splitSavedSignature", () => {
     ["Gmail", `<div>My reply</div><div class="gmail_quote"><div>---------- Forwarded message ---------</div><div class="zmail-signature">Ann</div></div>`],
   ])("ignores a signature block under a %s quote", (_name, html) => {
     expect(splitSavedSignature(`<html><body>${html}</body></html>`)).toBeNull();
+  });
+});
+
+// A signature block from a server draft may be someone else's HTML: none of it can stall the regexes that read it.
+describe("signature HTML built to stall", () => {
+  const ms = (f: () => unknown) => {
+    const t = performance.now();
+    f();
+    return performance.now() - t;
+  };
+
+  it("reads a 1 MB width attribute at once", () => {
+    expect(ms(() => expect(cssLengthPx(`${"1".repeat(1_000_000)}x`)).toBeNull())).toBeLessThan(200);
+    expect(ms(() => expect(cssLengthPx(`1${" ".repeat(1_000_000)}x`)).toBeNull())).toBeLessThan(200);
+  });
+
+  it("still reads ordinary lengths", () => {
+    expect(cssLengthPx(" 12pt ")).toBe(16);
+    expect(cssLengthPx(".5px")).toBe(0.5);
+    expect(cssLengthPx("40 PX")).toBe(40);
+    expect(cssLengthPx("1.")).toBeNull();
+  });
+
+  it("sanitizes a block full of comment openers that never close", () => {
+    for (const opener of ["<!--[if mso]>", "<!--"]) {
+      let out = "";
+      expect(ms(() => (out = sanitizeSignature(`<b>Alex</b>${opener.repeat(50_000)}`)))).toBeLessThan(2000);
+      expect(out).toContain("<b>Alex</b>");
+    }
+  });
+
+  it("still drops Office conditional blocks and comments", () => {
+    expect(sanitizeSignature("a<!--[if gte mso 9]>X<![endif]-->b<!-- c -->d<!--[IF x]>Y<![ENDIF]-->e<!-->f")).toBe("abdef");
+  });
+});
+
+describe("withoutRemoteLoads (a server signature's preview)", () => {
+  it("drops what would place the block over the app, and keeps its other styles", () => {
+    const out = withoutRemoteLoads(
+      `<div style="position: fixed; inset: 0; z-index: 2147483647; color: navy">Alex</div>` +
+        `<a href="https://example.com" style="color: red; /*;*/position: absolute; TOP: 0; inset-inline-start: 0">Rivera</a>`,
+    );
+    expect(out).not.toMatch(/position|inset|z-index|top/i);
+    const doc = new DOMParser().parseFromString(out, "text/html");
+    expect(doc.querySelector("div")!.style.color).toBe("navy");
+    expect(doc.querySelector("a")!.style.color).toBe("red");
   });
 });

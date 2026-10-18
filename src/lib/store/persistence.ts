@@ -11,8 +11,9 @@ import type { MailSection } from "@/lib/sections";
 import { migrateTextSignatures, type MailSignature, type SignatureDefaults } from "@/lib/signature";
 import { useMail } from "@/lib/store";
 import type { Lesson } from "./learning";
-import type { MailState, Resolution } from "./types";
+import type { DraftSignature, MailState, Resolution } from "./types";
 import { held } from "./held";
+import { DRAFT_SIGNATURES_CAP, validDraftSignatures } from "./draft-signatures";
 
 export const SNAPSHOT_KEY = "state.v1";
 const AUTO_HANDLED_CAP = 5000;
@@ -39,6 +40,7 @@ export interface Snapshot {
   signatureList?: MailSignature[];
   accountFilter?: string | null;
   signatureDefaults?: Record<string, SignatureDefaults>;
+  draftSignatures?: DraftSignature[];
   sections?: MailSection[];
   sectionOverrides?: Record<string, string | null>;
   lessons?: Lesson[];
@@ -84,6 +86,7 @@ const SAVED_FROM = {
   signatureList: "signatures",
   accountFilter: "accountFilter",
   signatureDefaults: "signatureDefaults",
+  draftSignatures: "draftSignatures",
   sections: "sections",
   sectionOverrides: "sectionOverrides",
   lessons: "lessons",
@@ -121,6 +124,7 @@ export function snapshot(s: Pick<MailState, SavedKey | "emails">): Required<Omit
     signatureList: s.signatures,
     accountFilter: s.accountFilter,
     signatureDefaults: s.signatureDefaults,
+    draftSignatures: s.draftSignatures.slice(-DRAFT_SIGNATURES_CAP),
     sections: s.sections,
     sectionOverrides: s.sectionOverrides,
     lessons: s.lessons,
@@ -156,6 +160,8 @@ export function restore(snap: Snapshot, _habits: Map<string, SenderHabit>) {
       hiddenCalendars: new Set(snap.hiddenCalendars ?? []),
       imageSenders: new Set(snap.imageSenders ?? []),
       accountFilter: snap.accountFilter && s.accounts.some((a) => a.id === snap.accountFilter) ? snap.accountFilter : null,
+      // Kept only for accounts still here.
+      draftSignatures: validDraftSignatures(snap.draftSignatures).filter((r) => s.accounts.some((a) => a.id === r.accountId)),
       sections: snap.sections ?? [],
       sectionOverrides: snap.sectionOverrides ?? {},
       lessons: snap.lessons ?? [],

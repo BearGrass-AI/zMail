@@ -23,6 +23,15 @@ export type View =
   | { kind: "scheduled" }
   | { kind: "folder"; folderId: string };
 
+/** A draft zMail saved, and a fingerprint of the signature block it wrote into it (see signatureFingerprint). */
+export interface DraftSignature {
+  accountId: string;
+  draftId: string;
+  /** Gmail gives each save a new message id; Outlook's is the draft id. */
+  messageId: string;
+  fingerprint: string;
+}
+
 /** What a mail action did: `done` changed on the server, `failed` were put back. Emails already there or already on their way are in neither. */
 /** What the open composer shows, for the assistant (body as plain text). */
 export interface ComposeEditPatch {
@@ -132,6 +141,8 @@ export interface MailState {
   signatures: MailSignature[];
   /** Per account: which signature goes on new mail and on replies/forwards. */
   signatureDefaults: Record<string, SignatureDefaults>;
+  /** Drafts zMail saved, oldest first: only these get their signature block back when reopened. */
+  draftSignatures: DraftSignature[];
   /** Your own sections (Bills, School…), sorted alongside the buckets. */
   sections: MailSection[];
   /** Section corrections: email id → section id, or null for "not in a section". */
