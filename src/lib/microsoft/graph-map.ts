@@ -246,8 +246,22 @@ export function toGraphMessage(msg: {
   };
 }
 
-/** Put our reply above the quoted original Outlook generated with createReply. */
-export function spliceReply(draftHtml: string | undefined, ours: string): string {
-  if (!draftHtml) return ours;
-  return /<body[^>]*>/i.test(draftHtml) ? draftHtml.replace(/<body[^>]*>/i, (m) => `${m}${ours}`) : `${ours}${draftHtml}`;
+/** The body of the draft createReply returns. Outlook builds it in the original's format, so a plain-text original comes back as text. */
+export interface GReplyBody {
+  contentType?: string;
+  content?: string;
+}
+
+/**
+ * Put our reply above the quoted original Outlook generated with createReply.
+ * Only an html quote is markup; anything else is the sender's own text, so it's escaped (line breaks kept) and can't add images or links.
+ */
+export function spliceReply(quote: GReplyBody | undefined, ours: string): string {
+  const draft = quote?.content;
+  if (!draft) return ours;
+  if (quote.contentType?.toLowerCase() !== "html") {
+    const text = draft.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\r?\n/g, "<br>");
+    return `${ours}${text}`;
+  }
+  return /<body[^>]*>/i.test(draft) ? draft.replace(/<body[^>]*>/i, (m) => `${m}${ours}`) : `${ours}${draft}`;
 }

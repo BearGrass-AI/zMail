@@ -409,6 +409,28 @@ describe("GraphProvider", () => {
     expect(calls[3].body).toMatchObject({ isInline: true, contentId: "image1.t@zmail" });
   });
 
+  // A plain-text original comes back from createReply as a text draft: the sender's text, markup and all, must stay text.
+  const TEXT_QUOTE = "________________________________\nFrom: Ann <ann@example.com>\n\nSee <img src=https://x.example/p> & thanks";
+  const TEXT_QUOTE_HTML = "________________________________<br>From: Ann &lt;ann@example.com&gt;<br><br>See &lt;img src=https://x.example/p&gt; &amp; thanks";
+
+  it("escapes a plain-text quoted original instead of sending the sender's markup as HTML", async () => {
+    routes.unshift([/POST .*\/createReply$/, { id: "DRAFT1", body: { contentType: "text", content: TEXT_QUOTE } }]);
+    const p = new GraphProvider(acct);
+    calls.length = 0;
+    await p.send({ to: ["ann@example.com"], cc: ["jane@example.org"], subject: "Re: x", text: "Thanks", html: "<div>Thanks</div>", replyTo: messageToEmail("m1", MSG) });
+    const body = (calls.find((c) => c.method === "PATCH")!.body as { body: { contentType: string; content: string } }).body;
+    expect(body).toEqual({ contentType: "HTML", content: `<div>Thanks</div>${TEXT_QUOTE_HTML}` });
+    expect(body.content).not.toMatch(/<img/i);
+  });
+
+  it("treats a quoted original with no contentType as text", async () => {
+    routes.unshift([/POST .*\/createReply$/, { id: "DRAFT1", body: { content: "<img src=https://x.example/p>" } }]);
+    const p = new GraphProvider(acct);
+    calls.length = 0;
+    await p.send({ to: ["ann@example.com"], subject: "Re: x", text: "Thanks", html: "<div>Thanks</div>", replyTo: messageToEmail("m1", MSG) });
+    expect((calls.find((c) => c.method === "PATCH")!.body as { body: { content: string } }).body.content).toBe("<div>Thanks</div>&lt;img src=https://x.example/p&gt;");
+  });
+
   it("a reply to another account's email goes out as a new message, not through that mailbox's message id", async () => {
     const p = new GraphProvider(acct);
     const replyTo = messageToEmail("g1", MSG);
@@ -473,6 +495,18 @@ describe("GraphProvider drafts", () => {
     expect(trail()[0]).toBe("PATCH /messages/DRAFT1");
     expect(trail()).not.toContain("POST /messages/AAMk1/createReply");
     expect((calls[0].body as { body: { content: string } }).body.content).toBe("<html><body><div>Two</div><hr><p>Original</p></body></html>");
+  });
+
+  it("a reply draft to a plain-text original keeps the quote escaped on every save", async () => {
+    routes.unshift([/POST .*\/createReply$/, { id: "DRAFT1", body: { contentType: "Text", content: "Hi\n<img src=https://x.example/p>" } }]);
+    const p = new GraphProvider(acct);
+    const replyTo = messageToEmail("m1", MSG);
+    await p.saveDraft({ to: ["a@b.com"], subject: "Re: x", text: "One", html: "<div>One</div>", replyTo });
+    const patched = () => (calls.find((c) => c.method === "PATCH")!.body as { body: { content: string } }).body.content;
+    expect(patched()).toBe("<div>One</div>Hi<br>&lt;img src=https://x.example/p&gt;");
+    calls.length = 0;
+    await p.saveDraft({ to: ["a@b.com"], subject: "Re: x", text: "Two", html: "<div>Two</div>", replyTo }, "DRAFT1");
+    expect(patched()).toBe("<div>Two</div>Hi<br>&lt;img src=https://x.example/p&gt;");
   });
 
   it("deletes attachments the user removed and uploads new ones", async () => {
