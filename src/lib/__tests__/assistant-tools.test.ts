@@ -1032,6 +1032,59 @@ describe("lanes", () => {
     expect((await executeTool(call("act", { ids: ["m0"], op: "set_lane" }), deps)).malformed).toBe(true);
     expect(deps.bulkCalls).toEqual([]);
   });
+
+  // Teaching the sorting model is a lasting change, so only a card the user clicked (or their own
+  // action) may do it; a direct act changes just those emails, even if email text steered the model.
+  describe("teaching", () => {
+    const store = async () => (await import("@/lib/store")).useMail;
+    const realBulk = async () => {
+      const useMail = await store();
+      useMail.setState({ emails: all.slice(0, 6), lessons: [], overrides: {}, laneRuled: {}, sectionOverrides: {} });
+      return fakeDeps({ bulk: (emails, op, opts) => useMail.getState().bulkApply(emails, op, opts) });
+    };
+
+    it("a direct set_lane or move_to_section changes the emails but teaches nothing, and Undo restores them", async () => {
+      const useMail = await store();
+      const deps = await realBulk();
+      useAssistant.getState().remember(all.slice(0, 3).map(ref));
+      // Each new action expires the last one's Undo, so undo each before the next.
+      await executeTool(call("act", { ids: ["m0", "m1"], op: "set_lane", lane: "ready_archive" }), deps);
+      expect(useMail.getState().overrides).toEqual({ m0: "ready_archive", m1: "ready_archive" });
+      expect(useMail.getState().lessons).toEqual([]);
+      await useMail.getState().bulkUndo(cards()[0].undo, cards()[0].op);
+      await executeTool(call("act", { ids: ["m2"], op: "move_to_section", section: "sec1" }), deps);
+      expect(useMail.getState().sectionOverrides).toEqual({ m2: "sec1" });
+      expect(useMail.getState().lessons).toEqual([]);
+      await useMail.getState().bulkUndo(cards()[1].undo, cards()[1].op);
+      expect([useMail.getState().overrides, useMail.getState().sectionOverrides, useMail.getState().lessons]).toEqual([{}, {}, []]);
+    });
+
+    it("a direct act's Undo leaves lessons the user taught alone", async () => {
+      const useMail = await store();
+      const deps = await realBulk();
+      useMail.getState().setBucket(["m0"], "needs_you");
+      const taught = useMail.getState().lessons;
+      useAssistant.getState().remember([ref(all[0])]);
+      await executeTool(call("act", { ids: ["m0"], op: "set_lane", lane: "ready_archive" }), deps);
+      expect(useMail.getState().lessons).toEqual(taught);
+      await useMail.getState().bulkUndo(cards()[0].undo, cards()[0].op);
+      expect(useMail.getState().overrides).toEqual({ m0: "needs_you" });
+      expect(useMail.getState().lessons).toEqual(taught);
+    });
+
+    it("a lane change confirmed on a card, and the user's own, still teach", async () => {
+      const useMail = await store();
+      const deps = await realBulk();
+      useAssistant.getState().remember(all.slice(0, 4).map(ref));
+      await executeTool(call("act", { ids: ["m0", "m1", "m2", "m3"], op: "set_lane", lane: "ready_archive" }), deps);
+      await confirmBulk(useAssistant.getState().items.find((i) => i.kind === "card")!.id, deps);
+      expect(useMail.getState().lessons.map((l) => [l.emailId, l.bucket]).sort()).toEqual([["m0", "ready_archive"], ["m1", "ready_archive"], ["m2", "ready_archive"], ["m3", "ready_archive"]]);
+      useMail.getState().setBucket(["m4"], "needs_you");
+      useMail.getState().setSection(["m5"], "sec1");
+      expect(useMail.getState().lessons.filter((l) => l.emailId === "m4" || l.emailId === "m5")).toHaveLength(2);
+    });
+  });
+
   it("propose_rule set_lane pushes a lane rule card; saving reports how many moved", async () => {
     const r = await executeTool(call("propose_rule", { from: "jbs@example.org", action: "set_lane", lane: "needs_you" }), fakeDeps());
     expect(r.content).toMatchObject({ status: "awaiting_confirmation" });

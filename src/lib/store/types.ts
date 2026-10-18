@@ -253,7 +253,8 @@ export interface MailState {
   setRead: (ids: string[], read: boolean) => Promise<ActionResult>;
   acceptSuggestion: (ids: string[]) => Promise<ActionResult>;
   dismissSuggestion: (ids: string[]) => void;
-  setBucket: (ids: string[], bucket: Bucket) => void;
+  /** Your correction: it also teaches the sorting model, unless learn is false (these emails only). */
+  setBucket: (ids: string[], bucket: Bucket, opts?: { learn?: boolean }) => void;
   /** Take emails out of Needs you without moving them (Done also marks them read). Teaches nothing. */
   resolve: (ids: string[], why: Resolution["why"]) => void;
   unresolve: (ids: string[]) => void;
@@ -275,8 +276,8 @@ export interface MailState {
   addSection: (input: Omit<MailSection, "id">) => string;
   updateSection: (id: string, patch: Partial<Omit<MailSection, "id">>) => void;
   removeSection: (id: string) => void;
-  /** Put emails in a section (null = take them out of any section). */
-  setSection: (ids: string[], sectionId: string | null) => void;
+  /** Put emails in a section (null = take them out of any section); teaches unless learn is false. */
+  setSection: (ids: string[], sectionId: string | null, opts?: { learn?: boolean }) => void;
   toggleCalendar: (id: string) => void;
   /** Add a suggestion to a calendar (real calendars get a real event). */
   acceptCalSuggestion: (id: string, response?: "yes" | "maybe", calendarId?: string) => Promise<void>;

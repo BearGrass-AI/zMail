@@ -31,6 +31,8 @@ export interface UndoEntry {
   bucket?: Bucket;
   bucketRuled?: boolean;
   bucketLesson?: Lesson;
+  /** A lane or section action that taught nothing; its Undo leaves lessons alone. */
+  untaught?: boolean;
 }
 
 export interface BulkResult {
@@ -45,6 +47,8 @@ export interface BulkResult {
 export interface BulkOptions {
   onProgress?: (done: number, total: number) => void;
   isCancelled?: () => boolean;
+  /** Lane and section ops: false changes only these emails and records no lesson for their senders. */
+  learn?: boolean;
 }
 
 /**
