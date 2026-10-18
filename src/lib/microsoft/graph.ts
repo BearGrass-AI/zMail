@@ -11,7 +11,7 @@ import { graphQuery, resolveFolder, type MailQuery } from "@/lib/ai/assistant/qu
 import { pool } from "@/lib/google/gmail";
 import { BATCH_ROUNDS, batchDelayMs, graphThrottle, isThrottledStatus, retryAfterFromHeaders } from "./throttle";
 import { NeedsPermissionError, fromGraphSetting, isPermissionError, toGraphSetting, type AutoReply, type GraphAutoReplySetting } from "@/lib/mail/auto-replies";
-import { WELL_KNOWN, foldersToTree, messageToEmail, spliceReply, toGraphMessage, type GAttachment, type GFileAttachment, type GMailFolder, type GMsg } from "./graph-map";
+import { WELL_KNOWN, foldersToTree, messageToEmail, spliceReply, toGraphMessage, type GAttachment, type GReplyBody, type GFileAttachment, type GMailFolder, type GMsg } from "./graph-map";
 
 export const GRAPH = "https://graph.microsoft.com/v1.0";
 
@@ -558,14 +558,14 @@ export class GraphProvider implements MailProvider {
    * with Outlook's quoted original; our HTML goes above it, then attachments, then send.
    */
   private async sendReplyDraft(replyToId: string, message: ReturnType<typeof toGraphMessage>) {
-    const draft = await this.api<{ id: string; body?: { content?: string } }>("POST", `/me/messages/${replyToId}/createReply`);
+    const draft = await this.api<{ id: string; body?: GReplyBody }>("POST", `/me/messages/${replyToId}/createReply`);
     try {
       const ours = message.body.contentType === "HTML" ? message.body.content : `<div>${message.body.content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>")}</div>`;
       await this.api("PATCH", `/me/messages/${draft.id}`, {
         toRecipients: message.toRecipients,
         ccRecipients: message.ccRecipients,
         bccRecipients: message.bccRecipients,
-        body: { contentType: "HTML", content: spliceReply(draft.body?.content, ours) },
+        body: { contentType: "HTML", content: spliceReply(draft.body, ours) },
       });
       for (const a of message.attachments) await this.api("POST", `/me/messages/${draft.id}/attachments`, a);
       await this.api("POST", `/me/messages/${draft.id}/send`);
@@ -576,8 +576,8 @@ export class GraphProvider implements MailProvider {
     }
   }
 
-  /** Quoted original Outlook generated for each reply draft this session, so re-saves keep it under our text. */
-  private draftQuotes = new Map<string, string>();
+  /** Quoted original Outlook generated for each reply draft this session, with its format, so re-saves keep it under our text. */
+  private draftQuotes = new Map<string, GReplyBody>();
 
   async saveDraft(msg: SendRequest, draftId?: string): Promise<{ draftId: string; messageId: string }> {
     const message = toGraphMessage(msg);
@@ -587,9 +587,9 @@ export class GraphProvider implements MailProvider {
     const first = !id;
     if (!id) {
       if (replyTo) {
-        const created = await this.api<{ id: string; body?: { content?: string } }>("POST", `/me/messages/${replyTo.id}/createReply`);
+        const created = await this.api<{ id: string; body?: GReplyBody }>("POST", `/me/messages/${replyTo.id}/createReply`);
         id = created.id;
-        if (created.body?.content) this.draftQuotes.set(id, created.body.content);
+        if (created.body?.content) this.draftQuotes.set(id, { contentType: created.body.contentType, content: created.body.content });
       } else {
         const { attachments: _a, ...rest } = message;
         const created = await this.api<{ id: string }>("POST", "/me/messages", rest);
@@ -644,7 +644,7 @@ export class GraphProvider implements MailProvider {
     const known = this.draftFiles.get(id);
     const kept = new Map<string, string>();
     // Images Outlook copied from the original into a reply draft belong to its quoted original, which we keep as is.
-    const quote = this.draftQuotes.get(id)?.toLowerCase() ?? "";
+    const quote = this.draftQuotes.get(id)?.content?.toLowerCase() ?? "";
     for (const e of existing.value) {
       if (e.isInline) {
         const cid = (e.contentId ?? "").replace(/^<|>$/g, "");
@@ -706,9 +706,9 @@ export class GraphProvider implements MailProvider {
     this.draftQuotes.delete(draftId);
   }
 
-  /** A reopened reply draft's quoted original, taken off its body, so saves splice it back in as with createReply's. */
+  /** A reopened reply draft's quoted original, taken off its HTML body, so saves splice it back in as with createReply's. */
   keepDraftQuote(draftId: string, quote: string) {
-    this.draftQuotes.set(draftId, quote);
+    this.draftQuotes.set(draftId, { contentType: "html", content: quote });
   }
 
   async deleteDraft(draftId: string) {
