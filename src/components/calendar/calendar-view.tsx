@@ -21,6 +21,8 @@ import { useSettings } from "@/lib/settings";
 import { isTauri } from "@tauri-apps/api/core";
 import { startOfWeek } from "@/lib/calendar/mock-calendar";
 import { monthGrid } from "@/lib/calendar/month-grid";
+import { layoutDay, type Span } from "@/lib/calendar/day-layout";
+import { weekLabel } from "@/lib/calendar/week-label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   ContextMenu,
@@ -34,7 +36,12 @@ import { hue } from "../meta";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { confirmDeleteText, deleteEventWithUndo, otherGuests } from "@/lib/calendar/delete-event";
 
-const HOUR = 52;
+/** Pixels per hour in the week and day grids, which scroll through the whole day. */
+const HOUR = 54;
+/** The hour the grid opens at, unless that would leave now below the fold. */
+const OPEN_AT = 7;
+/** Blocks shorter than this put the time beside the title instead of under it. */
+const SHORT_PX = 38;
 
 async function openLink(url: string) {
   if (isTauri()) {
@@ -42,22 +49,63 @@ async function openLink(url: string) {
     await openUrl(url);
   } else window.open(url, "_blank", "noopener");
 }
-const START = 8;
-const END = 19;
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+/** "9 AM", "9:30 AM". */
+const fmtShort = (iso: string) => fmtTime(iso).replace(/:00(?=\s?[AP]M)/i, "");
+const timeRange = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
+/** "9:00 – 10:00 AM". */
+function fmtRange(e: CalEvent) {
+  try {
+    return timeRange.formatRange(new Date(e.start), new Date(e.end));
+  } catch {
+    return fmtTime(e.start);
+  }
+}
 
-/** Assign side-by-side lanes to overlapping events within one day. */
-function layoutDay(events: CalEvent[]) {
-  const lanes: number[] = [];
-  const placed = events.map((e) => {
-    const start = Date.parse(e.start);
-    let lane = lanes.findIndex((end) => end <= start);
-    if (lane === -1) lane = lanes.length;
-    lanes[lane] = Date.parse(e.end);
-    return { e, lane };
-  });
-  return placed.map((p) => ({ ...p, lanes: lanes.length }));
+/** Re-renders once a minute, for the now line. */
+function useMinute() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
+/** The hour labels down the grid's left edge, and the current time in red when today is shown. */
+function HourGutter({ showNow }: { showNow: boolean }) {
+  const now = useMinute();
+  const at = now.getHours() + now.getMinutes() / 60;
+  return (
+    <div className="relative">
+      {Array.from({ length: 23 }, (_, i) => i + 1).map((h) =>
+        // The current time takes the place of an hour label it would overlap.
+        showNow && Math.abs(h - at) < 0.3 ? null : (
+          <div key={h} className="absolute right-2 text-[10px] text-foreground/35 tabular-nums" style={{ top: h * HOUR - 6 }}>
+            {new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric" })}
+          </div>
+        ),
+      )}
+      {showNow && (
+        <div className="absolute right-1.5 z-20 text-[10px] font-semibold text-[var(--bucket-needs_you)] tabular-nums" style={{ top: at * HOUR - 6 }}>
+          {now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/i, "")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NowLine() {
+  const now = useMinute();
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 z-20 h-0.5 bg-[var(--bucket-needs_you)]"
+      style={{ top: (now.getHours() + now.getMinutes() / 60) * HOUR }}
+    >
+      <span className="absolute -top-[3px] -left-1 size-2 rounded-full bg-[var(--bucket-needs_you)]" />
+    </div>
+  );
 }
 
 const RSVP = { accepted: ["Accept", "Accepted"], tentative: ["Maybe", "Marked tentative"], declined: ["Decline", "Declined"] } as const;
@@ -153,7 +201,17 @@ function EventDetails({ e }: { e: CalEvent }) {
   );
 }
 
-function EventBlock({ e, lane, lanes, flip }: { e: CalEvent; lane: number; lanes: number; flip?: boolean }) {
+/** Where a block sits in its group of overlapping events, and how far in from the column's left edge. */
+interface Slot {
+  lane: number;
+  span: number;
+  lanes: number;
+  inset: number;
+}
+
+/** A timed event: a block in its lane, or (with no slot) a band behind the day whose label opens it. */
+function EventBlock({ x, slot, past, flip }: { x: Span; slot: Slot | null; past: boolean; flip?: boolean }) {
+  const e = x.e;
   const mail = useMail((s) => emailForEvent(s, e));
   const cal = useMail((s) => s.calendars.find((c) => c.id === e.calendarId));
   const guests = useMail((s) => otherGuests(e, s.accounts.map((a) => a.address)));
@@ -161,39 +219,59 @@ function EventBlock({ e, lane, lanes, flip }: { e: CalEvent; lane: number; lanes
   const select = useMail((s) => s.select);
   const openCompose = useMail((s) => s.openCompose);
   const evHue = e.hue ?? cal?.hue ?? 255;
-  const start = new Date(e.start);
-  const top = (start.getHours() + start.getMinutes() / 60 - START) * HOUR;
-  const height = Math.max(22, ((Date.parse(e.end) - start.getTime()) / 36e5) * HOUR - 3);
-  const past = Date.parse(e.end) < Date.now();
-  const width = 100 / lanes;
+  const height = slot ? Math.max(20, (x.end - x.start) * HOUR - 3) : (x.end - x.start) * HOUR;
+  const short = height < SHORT_PX;
 
   // Deleting emails every guest a cancellation: ask first when there are any.
   const remove = () => (guests ? setConfirmDelete(true) : deleteEventWithUndo(e));
 
-  return (
+  let trigger;
+  if (slot) {
+    const w = 100 / slot.lanes;
+    const left = slot.lane ? 2 : slot.inset;
+    trigger = (
+      <motion.button
+        initial={{ opacity: 0, scale: 0.97 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={SPRING}
+        style={{ ...hue(evHue), top: x.start * HOUR + 1, height, left: `calc(${slot.lane * w}% + ${left}px)`, width: `calc(${slot.span * w}% - ${left + 3}px)` }}
+        className={cn(
+          "cal-block absolute overflow-hidden rounded-md px-[7px] text-left leading-tight transition-[filter] hover:z-10 hover:brightness-110",
+          past && "cal-past",
+          short ? "flex items-baseline gap-1.5 py-0.5" : "py-[3px]",
+        )}
+      />
+    );
+  } else {
+    trigger = <button className="pointer-events-auto sticky top-0 block max-w-full truncate px-1.5 py-[3px] text-left text-[10.5px] font-semibold hover:underline" />;
+  }
+
+  const shell = (
     <Popover>
       <ContextMenu>
-        <ContextMenuTrigger
-          render={
-            <PopoverTrigger
-              render={
-                <motion.button
-                  initial={{ opacity: 0, scale: 0.97 }}
-                  animate={{ opacity: past ? 0.5 : 1, scale: 1 }}
-                  transition={SPRING}
-                  style={{ ...hue(evHue), top, height, left: `calc(${lane * width}% + 3px)`, width: `calc(${width}% - 6px)` }}
-                  className="cal-ev absolute overflow-hidden rounded-md px-2 py-1 text-left text-[11.5px] leading-tight transition-[filter] hover:z-10 hover:brightness-110"
-                />
-              }
-            />
-          }
-        >
-          <div className="truncate font-semibold">{e.title}</div>
-          {height > 34 && <div className="truncate opacity-75">{fmtTime(e.start)}{e.location ? ` · ${e.location}` : ""}</div>}
-          {mail && height > 50 && (
-            <span className="mt-1 inline-flex max-w-full items-center gap-1 rounded-full bg-black/10 px-1.5 py-px text-[10.5px] dark:bg-black/30">
-              <Mail className="size-2.5 shrink-0" /> <span className="truncate">{mail.subject}</span>
-            </span>
+        <ContextMenuTrigger render={<PopoverTrigger render={trigger} />}>
+          {!slot ? (
+            <>
+              {e.title} · {fmtRange(e)}
+            </>
+          ) : short ? (
+            <>
+              <span className="min-w-0 truncate text-[12.5px] font-semibold tracking-[-0.005em]">{e.title}</span>
+              <span className="shrink-0 text-[11px] opacity-70 tabular-nums">{fmtShort(e.start)}</span>
+            </>
+          ) : (
+            <>
+              <div className="truncate text-[12.5px] font-semibold tracking-[-0.005em]">{e.title}</div>
+              <div className="mt-px truncate text-[11px] opacity-70 tabular-nums">
+                {fmtRange(e)}
+                {e.location ? ` · ${e.location}` : ""}
+              </div>
+              {mail && height > 56 && (
+                <span className="mt-1 inline-flex max-w-full items-center gap-1 rounded-full bg-black/10 px-1.5 py-px text-[10.5px] dark:bg-black/30">
+                  <Mail className="size-2.5 shrink-0" /> <span className="truncate">{mail.subject}</span>
+                </span>
+              )}
+            </>
           )}
         </ContextMenuTrigger>
         <ContextMenuContent className="w-52">
@@ -247,6 +325,12 @@ function EventBlock({ e, lane, lanes, flip }: { e: CalEvent; lane: number; lanes
       </Dialog>
     </Popover>
   );
+  if (slot) return shell;
+  return (
+    <div className="cal-band pointer-events-none absolute inset-x-0" style={{ ...hue(evHue), top: x.start * HOUR, height }}>
+      {shell}
+    </div>
+  );
 }
 
 const MONTH_SHOWN = 3;
@@ -265,8 +349,8 @@ function MonthEvent({ e, s, flip, now }: { e: CalEvent; s: CalState; flip: boole
             style={hue(h)}
             className={cn(
               "flex w-full min-w-0 items-center gap-1 rounded px-1 py-px text-left text-[11px] leading-tight hover:bg-foreground/[0.07]",
-              e.allDay && "cal-ev font-semibold",
-              past && "opacity-50",
+              e.allDay && "cal-chip font-semibold",
+              past && (e.allDay ? "cal-past" : "text-foreground/60"),
             )}
             title={e.title}
           />
@@ -407,10 +491,18 @@ export function CalendarView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `now` is a fresh Date each render; it only picks 5 vs 7 columns, so the week/day/offset changes are what rebuild this.
   }, [mode, offset, dayOffset, month]);
 
+  // Open the grid at 7 AM, or further down when now would be below the fold. Again on leaving Month,
+  // which unmounts the grid.
+  const monthShown = mode === "month";
   useEffect(() => {
-    scroller.current?.scrollTo({ top: Math.max(0, (now.getHours() - START - 1) * HOUR) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Scroll to the current hour once, on mount.
-  }, []);
+    const el = scroller.current;
+    if (monthShown || !el) return;
+    const t = new Date();
+    const hour = t.getHours() + t.getMinutes() / 60;
+    const shown = el.clientHeight / HOUR;
+    // 10px above the hour, so its label isn't cut off by the day headers.
+    el.scrollTo({ top: Math.max(0, (hour > OPEN_AT + shown - 1 ? hour - shown / 3 : OPEN_AT) * HOUR - 10) });
+  }, [monthShown]);
 
   // Weeks beyond the synced window (about a month ahead) load when you page to them.
   useEffect(() => {
@@ -435,6 +527,7 @@ export function CalendarView() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-3 px-5 pb-3">
           <h2 className="text-[19px] font-semibold tracking-[-0.02em]">{title}</h2>
+          {mode === "week" && <span className="text-[12.5px] text-foreground/45 tabular-nums">{weekLabel(days)}</span>}
           <div className="flex items-center gap-1">
             <button onClick={() => step(-1)} className="grid size-7 place-items-center rounded-md hover:bg-foreground/[0.06]" aria-label="Previous">
               <ChevronLeft className="size-4" />
@@ -491,18 +584,16 @@ export function CalendarView() {
           {days.map((d) => {
             const today = sameDay(d, now);
             return (
-              <div key={d.toISOString()} className="border-l border-hairline px-2.5 py-1.5">
-                <div className="text-[10.5px] font-semibold tracking-[0.05em] text-foreground/45 uppercase">
-                  {d.toLocaleDateString([], { weekday: "short" })}
-                </div>
-                <div
+              <div key={d.toISOString()} className="flex h-9 items-center gap-1.5 border-l border-hairline px-2.5 text-[12px] text-foreground/50">
+                {d.toLocaleDateString([], { weekday: "short" })}
+                <span
                   className={cn(
-                    "mt-0.5 text-[17px] leading-none font-semibold tracking-[-0.02em]",
-                    today && "inline-grid h-[22px] min-w-[28px] place-items-center rounded-full bg-[var(--bucket-needs_you)] px-1.5 text-[13px] text-white",
+                    "text-[13.5px] font-semibold text-foreground tabular-nums",
+                    today && "inline-grid h-[22px] min-w-[22px] place-items-center rounded-full bg-[var(--bucket-needs_you)] px-1.5 text-[12.5px] text-white",
                   )}
                 >
                   {d.getDate()}
-                </div>
+                </span>
               </div>
             );
           })}
@@ -517,7 +608,7 @@ export function CalendarView() {
                   <div
                     key={e.id}
                     style={hue(eventHue(s, e))}
-                    className="cal-ev truncate rounded-md px-2 py-0.5 text-[11px] font-semibold"
+                    className={cn("cal-chip truncate rounded-[5px] px-2 py-0.5 text-[11px] font-semibold", Date.parse(e.end) < now.getTime() && "cal-past")}
                     title={e.title}
                   >
                     {e.title}
@@ -529,45 +620,52 @@ export function CalendarView() {
         )}
 
         <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="relative grid" style={{ gridTemplateColumns: `52px repeat(${days.length}, 1fr)`, height: (END - START) * HOUR }}>
-            <div className="relative">
-              {Array.from({ length: END - START }, (_, i) => (
-                <div key={i} className="absolute right-2 text-[10px] text-foreground/35" style={{ top: i * HOUR - 6 }}>
-                  {i === 0 ? "" : new Date(2000, 0, 1, START + i).toLocaleTimeString([], { hour: "numeric" })}
-                </div>
-              ))}
-            </div>
+          <div
+            className="relative grid"
+            style={{
+              gridTemplateColumns: `52px repeat(${days.length}, 1fr)`,
+              height: 24 * HOUR,
+              // Hour lines, and fainter half-hour lines.
+              backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 ${HOUR - 1}px, var(--hairline) ${HOUR - 1}px ${HOUR}px), repeating-linear-gradient(to bottom, transparent 0 ${HOUR / 2 - 1}px, color-mix(in oklch, var(--hairline) 45%, transparent) ${HOUR / 2 - 1}px ${HOUR / 2}px)`,
+            }}
+          >
+            <HourGutter showNow={days.some((d) => sameDay(d, now))} />
             {days.map((d, col) => {
               const today = sameDay(d, now);
+              const weekend = days.length === 7 && (d.getDay() === 0 || d.getDay() === 6);
+              const { bands, placed } = layoutDay(dayEvents(s, d).timed, d);
+              const flip = days.length > 1 && col >= days.length - 2;
               return (
                 <div
                   key={d.toISOString()}
                   onDoubleClick={(ev) => {
-                    if ((ev.target as HTMLElement).closest(".cal-ev")) return;
+                    if ((ev.target as HTMLElement).closest(".cal-block, button")) return;
                     const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-                    const hours = START + Math.floor(((ev.clientY - rect.top) / HOUR) * 2) / 2;
+                    const hours = Math.min(23.5, Math.floor(((ev.clientY - rect.top) / HOUR) * 2) / 2);
                     const start = new Date(d);
                     start.setHours(Math.floor(hours), (hours % 1) * 60, 0, 0);
                     openNewEvent({ start: start.toISOString(), end: new Date(start.getTime() + 30 * 60000).toISOString() });
                   }}
                   title="Double-click to add an event"
-                  className={cn("relative border-l border-hairline", today && "bg-foreground/[0.018]")}
-                  style={{ backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 ${HOUR - 1}px, var(--hairline) ${HOUR - 1}px ${HOUR}px)` }}
+                  className={cn("relative border-l border-hairline", today ? "bg-foreground/[0.018]" : weekend && "bg-foreground/[0.012]")}
                 >
+                  {bands.map((x) => (
+                    <EventBlock key={x.e.id} x={x} slot={null} past={Date.parse(x.e.end) < now.getTime()} flip={flip} />
+                  ))}
                   {/* initial={false}: a week or day step remounts the columns; their events just appear. */}
                   <AnimatePresence initial={false}>
-                    {layoutDay(dayEvents(s, d).timed).map(({ e, lane, lanes }) => (
-                      <EventBlock key={e.id} e={e} lane={lane} lanes={lanes} flip={days.length > 1 && col >= days.length - 2} />
+                    {placed.map((p) => (
+                      <EventBlock
+                        key={p.e.id}
+                        x={p}
+                        // Blocks over a band start past its edge stripe.
+                        slot={{ lane: p.lane, span: p.span, lanes: p.lanes, inset: bands.some((b) => b.start < p.end && b.end > p.start) ? 7 : 3 }}
+                        past={Date.parse(p.e.end) < now.getTime()}
+                        flip={flip}
+                      />
                     ))}
                   </AnimatePresence>
-                  {today && now.getHours() >= START && now.getHours() < END && (
-                    <div
-                      className="absolute inset-x-0 z-20 h-0.5 bg-[var(--bucket-needs_you)]"
-                      style={{ top: (now.getHours() + now.getMinutes() / 60 - START) * HOUR }}
-                    >
-                      <span className="absolute -top-[3px] -left-1 size-2 rounded-full bg-[var(--bucket-needs_you)]" />
-                    </div>
-                  )}
+                  {today && <NowLine />}
                 </div>
               );
             })}

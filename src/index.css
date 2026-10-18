@@ -392,6 +392,43 @@ html.reduce-transparency.translucent.dark .shell-blur { background: transparent;
   color: oklch(0.88 0.06 var(--h));
 }
 
+/* The Calendar view's events: a solid fill with a faint edge; past ones quieter, never faded out. */
+.cal-block, .cal-chip {
+  --ev: oklch(0.62 0.15 var(--h));
+  background: color-mix(in oklch, var(--ev) 24%, var(--pane));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ev) 30%, transparent);
+  color: oklch(0.32 0.1 var(--h));
+}
+.cal-block.cal-past, .cal-chip.cal-past {
+  background: color-mix(in oklch, var(--ev) 13%, var(--pane));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ev) 18%, transparent);
+  color: oklch(0.42 0.06 var(--h));
+}
+.dark .cal-block, .dark .cal-chip {
+  --ev: oklch(0.66 0.14 var(--h));
+  background: color-mix(in oklch, var(--ev) 32%, var(--pane));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, oklch(0.7 0.14 var(--h)) 35%, transparent);
+  color: oklch(0.95 0.035 var(--h));
+}
+.dark .cal-block.cal-past, .dark .cal-chip.cal-past {
+  background: color-mix(in oklch, oklch(0.62 0.1 var(--h)) 22%, var(--pane));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, oklch(0.62 0.1 var(--h)) 25%, transparent);
+  color: oklch(0.86 0.035 var(--h));
+}
+/* A block of five hours or more: stripes behind the day, so the meetings inside keep their width. */
+.cal-band {
+  --ev: oklch(0.62 0.14 var(--h));
+  background: repeating-linear-gradient(135deg, color-mix(in oklch, var(--ev) 11%, transparent) 0 6px, color-mix(in oklch, var(--ev) 5%, transparent) 6px 12px);
+  border-left: 3px solid color-mix(in oklch, var(--ev) 65%, transparent);
+  color: oklch(0.38 0.08 var(--h));
+}
+.dark .cal-band {
+  --ev: oklch(0.66 0.14 var(--h));
+  background: repeating-linear-gradient(135deg, color-mix(in oklch, var(--ev) 13%, transparent) 0 6px, color-mix(in oklch, var(--ev) 7%, transparent) 6px 12px);
+  border-left-color: color-mix(in oklch, oklch(0.7 0.14 var(--h)) 70%, transparent);
+  color: oklch(0.88 0.05 var(--h));
+}
+
 /* Assistant replies (Markdown): compact, fits the 340px panel. */
 .assistant-md > * + * { margin-top: 0.5em; }
 .assistant-md ul, .assistant-md ol { padding-left: 1.25em; }
