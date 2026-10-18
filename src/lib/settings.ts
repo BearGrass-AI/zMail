@@ -80,6 +80,8 @@ export interface Settings {
   suggestThreshold: number;
   /** Width in px of the ✦ Assistant side panel (drag its left edge to change). */
   assistantWidth: number;
+  /** The sidebar folded to a rail of icons (⌃⌘S). */
+  sidebarCollapsed: boolean;
   /** Today: read mail below a divider ("all") or hidden ("unread"). */
   todayShow: "all" | "unread";
   /** Today's Needs you order: the model's urgency, or by date. */
@@ -138,6 +140,7 @@ export const useSettings = create<SettingsStore>()(
       aiRoles: noRoles(),
       suggestThreshold: 0.7,
       assistantWidth: 340,
+      sidebarCollapsed: false,
       todayShow: "all",
       needsSort: "urgency",
       travelPlaces: { home: "", work: "" },

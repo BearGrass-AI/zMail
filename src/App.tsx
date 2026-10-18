@@ -30,6 +30,7 @@ import { clampWidth, useDragWidth } from "@/lib/ai/assistant/panel-width";
 import { useAssistant, listKeyBlocked, loadAssistant, startAssistantAutosave } from "@/lib/ai/assistant/state";
 import { startNotifications } from "@/lib/notifications";
 import { handleZoomKey } from "@/lib/page-zoom";
+import { focusSearch, toggleSidebar } from "@/lib/sidebar";
 
 function useShortcuts(openSettings: () => void) {
   useEffect(() => {
@@ -39,9 +40,14 @@ function useShortcuts(openSettings: () => void) {
       const mod = e.metaKey || e.ctrlKey;
       // ⌘+ / ⌘− / ⌘0 zoom everywhere, text fields included, as in Safari.
       if (handleZoomKey(e)) return;
+      // ⌃⌘S hides or shows the sidebar, as in Apple Mail. e.code: Control changes e.key on some layouts.
+      if (e.metaKey && e.ctrlKey && e.code === "KeyS") {
+        e.preventDefault();
+        return toggleSidebar();
+      }
       if (mod && e.key === "k") {
         e.preventDefault();
-        return document.getElementById("global-search")?.focus();
+        return focusSearch();
       }
       if (mod && e.key === "j") {
         e.preventDefault();

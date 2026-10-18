@@ -16,6 +16,7 @@ const SHORTCUTS: [string, string][] = [
   ["C", "New message"],
   ["# / ⌫", "Delete"],
   ["⌘K", "Search"],
+  ["⌃⌘S", "Hide / show the sidebar"],
   ["⌘,", "Settings"],
   ["Esc", "Close reader / composer"],
 ];

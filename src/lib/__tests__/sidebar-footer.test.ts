@@ -82,3 +82,22 @@ describe("sidebar footer", () => {
     expect(onSettings).toHaveBeenCalledOnce();
   });
 });
+
+describe("sidebar footer, folded", () => {
+  const fold = () => act(() => root.render(createElement(SidebarFooter, { onSettings, collapsed: true })));
+
+  it("keeps the account badges and Settings, without the synced line", () => {
+    fold();
+    expect(text()).not.toContain("Synced");
+    expect(document.querySelectorAll('[title^="Gmail"], [title^="Outlook"]')).toHaveLength(2);
+    act(() => (document.querySelector('[aria-label="Settings"]') as HTMLButtonElement).click());
+    expect(onSettings).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an account that couldn't sync as an icon that opens Accounts", () => {
+    set({ g: { state: "error", error: "401 Unauthorized", at: Date.now() }, o: { state: "ok", at: Date.now() } });
+    fold();
+    act(() => (document.querySelector(`[aria-label="Gmail couldn't sync"]`) as HTMLButtonElement).click());
+    expect(useSettingsOpen.getState()).toMatchObject({ open: true, section: "accounts" });
+  });
+});
