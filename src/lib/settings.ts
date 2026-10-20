@@ -98,6 +98,8 @@ export interface Settings {
   ropeLineHosted: boolean;
   /** Address of that service, with no path. Empty until the user sets one. */
   ropeLineHostedUrl: string;
+  /** Move a confident spam verdict into the provider's Spam folder. Off keeps the flag only. */
+  ropeLineAct: boolean;
 }
 
 interface SettingsStore extends Settings {
@@ -162,6 +164,7 @@ export const useSettings = create<SettingsStore>()(
       },
       ropeLineHosted: false,
       ropeLineHostedUrl: "",
+      ropeLineAct: false,
       set: (patch) => set(patch),
       setHue: (key, hue) =>
         set((s) => {

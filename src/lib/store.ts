@@ -27,6 +27,7 @@ import { decisionProvider, generativeProvider } from "@/lib/ai/providers";
 import { nextRopeLineFlags, ownDomains } from "@/lib/ropeline";
 import { adviseInbox } from "@/lib/ropeline-questions";
 import { attachVerdicts } from "@/lib/ropeline-hosted";
+import { confidentSpamIds, SPAM_REASON } from "@/lib/ropeline-act";
 import { isDateCandidate } from "@/lib/date-candidates";
 import { clipText } from "@/lib/mail/clip-text";
 import { useSettings } from "@/lib/settings";
@@ -996,6 +997,29 @@ export const useMail = create<MailState>()((set, get) => {
           if (advised) set({ ropelineFlags: advised });
           const judged = await attachVerdicts(get().ropelineFlags, inbox, useSettings.getState());
           if (judged) set({ ropelineFlags: judged });
+          const actIds = confidentSpamIds(get().emails, get().ropelineFlags, inboxFolderIds(get().folders), useSettings.getState().ropeLineAct);
+          if (actIds.length) {
+            const list = get().emails.filter((e) => actIds.includes(e.id));
+            const op = { kind: "spam" as const };
+            const res = await get().bulkApply(list, op, { learn: false });
+            const moved = new Set(res.undo.map((u) => u.id));
+            if (moved.size) {
+              set((st) => {
+                const ropelineFlags = { ...st.ropelineFlags };
+                for (const id of moved) if (ropelineFlags[id]) ropelineFlags[id] = { ...ropelineFlags[id], reason: SPAM_REASON };
+                return { ropelineFlags };
+              });
+              toast(`RopeLine marked ${moved.size} as spam`, {
+                description: SPAM_REASON,
+                action: {
+                  label: "Undo",
+                  onClick: () => {
+                    void get().bulkUndo(res.undo, op).catch(() => toast("Couldn't undo"));
+                  },
+                },
+              });
+            }
+          }
           // Every email failing is a failed sort; some failing keeps the rest and counts the misses.
           const error = r.lastError ?? "Sorting failed";
           if (r.failed && !r.done) set((s) => ({ sorting: { ...s.sorting, running: false, error } }));

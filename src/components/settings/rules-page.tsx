@@ -18,6 +18,7 @@ export function RulesPage() {
   const findDates = useSettings((x) => x.findDatesEverywhere);
   const hosted = useSettings((x) => x.ropeLineHosted);
   const hostedUrl = useSettings((x) => x.ropeLineHostedUrl);
+  const act = useSettings((x) => x.ropeLineAct);
   const setSetting = useSettings((x) => x.set);
   const muted = Object.keys(s.noDateSenders);
   // Reset can't be undone: it asks first, naming what goes.
@@ -61,6 +62,9 @@ export function RulesPage() {
             spellCheck={false}
             className="w-56 rounded-md bg-transparent px-2 py-1 text-[13px] outline-none ring-1 ring-foreground/15"
           />
+        </Row>
+        <Row label="Move confident spam to Spam" hint="Off keeps a flag. On moves only a spam verdict, with Undo. Trash is never used.">
+          <Switch checked={act} onCheckedChange={(on) => setSetting({ ropeLineAct: on })} aria-label="Move confident spam to Spam" />
         </Row>
       </Group>
       <Group title="Dates">

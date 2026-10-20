@@ -60,6 +60,8 @@ export interface RopeLineFlag {
   advice?: RopeLineAdvice;
   /** Hosted verdict. Absent until that call is allowed and has answered. */
   verdict?: "good" | "unsure" | "spam";
+  /** Shown when a confident spam verdict was moved to Spam. */
+  reason?: string;
 }
 
 export interface RopeLineAdvice {
@@ -371,7 +373,8 @@ export function validRopeLineFlags(raw: unknown): Record<string, RopeLineFlag> {
     const advice = validAdvice((f as { advice?: unknown }).advice);
     const verdict = (f as { verdict?: unknown }).verdict;
     const word = verdict === "good" || verdict === "unsure" || verdict === "spam" ? verdict : undefined;
-    out[id] = { flagged: signals.length > 0, signals, fingerprint, key, ...(advice ? { advice } : {}), ...(word ? { verdict: word } : {}) };
+    const reason = typeof (f as { reason?: unknown }).reason === "string" ? (f as { reason: string }).reason.slice(0, 200) : undefined;
+    out[id] = { flagged: signals.length > 0, signals, fingerprint, key, ...(advice ? { advice } : {}), ...(word ? { verdict: word } : {}), ...(reason ? { reason } : {}) };
   }
   return out;
 }
