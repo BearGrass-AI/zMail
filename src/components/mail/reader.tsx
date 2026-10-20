@@ -40,6 +40,7 @@ import { warmRender } from "@/lib/mail/dark-mode";
 import { useAppDark } from "@/lib/theme";
 import { isSingleMailbox } from "@/lib/mail/address";
 import { AttachmentStrip } from "./attachments";
+import { RopeLineScreen } from "./ropeline-screen";
 import { bucketOf, categoryOf } from "@/lib/store";
 
 /** Text already revealed this session (the last 50), so reopening a summary shows it at once. */
@@ -430,6 +431,7 @@ export function Reader() {
         <div className="flex min-h-0 flex-1 flex-col">
             <div ref={scroller} className="flex-1 overflow-y-auto px-8 py-7">
               <h2 className="selectable text-[24px] leading-tight font-semibold tracking-tight">{email.subject}</h2>
+              <RopeLineScreen email={email} />
               <div className="mt-4 flex items-center gap-3">
                 <SenderAvatar contact={email.from} junk={junk} className="size-10 text-[13px]" />
                 <div className="min-w-0 flex-1">

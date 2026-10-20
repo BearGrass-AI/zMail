@@ -134,6 +134,14 @@ describe("unsnooze and list_snoozed", () => {
     expect(snoozed).toEqual({});
   });
 
+  it("asks before unsnoozing when a named message is not loaded", async () => {
+    useAssistant.getState().remember([{ id: "ghost", accountId: "a" }]);
+    snoozed = { e1: Date.now() + 1e7 };
+    const r = await run("unsnooze", { ids: ["e1", "ghost"] });
+    expect(r.content).toMatchObject({ status: "awaiting_confirmation" });
+    expect(snoozed.e1).toBeTypeOf("number");
+  });
+
   it("unsnooze has an Undo that restores the removed times", async () => {
     const t = Date.now() + 1e7;
     snoozed = { e1: t, e2: t + 1 };

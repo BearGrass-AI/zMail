@@ -261,6 +261,8 @@ export interface MailState {
   archive: (ids: string[]) => Promise<ActionResult>;
   trash: (ids: string[]) => Promise<ActionResult>;
   spam: (ids: string[]) => Promise<ActionResult>;
+  /** Record one RopeLine question. It does not move the message. */
+  setRopeLineCheck: (emailId: string, questionId: string, on: boolean) => void;
   snooze: (ids: string[], until: number) => void;
   unsnooze: (ids: string[]) => void;
   toggleStar: (id: string) => Promise<ActionResult>;

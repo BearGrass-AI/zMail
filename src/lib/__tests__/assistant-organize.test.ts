@@ -180,6 +180,14 @@ describe("categories", () => {
     expect(cats.m2).toBeUndefined();
   });
 
+  it("asks before changing a message that is not in the loaded inbox", async () => {
+    const { deps, calls } = setup();
+    know("ghost");
+    const res = await run("set_category", { ids: ["ghost"], category: "promotions" }, deps);
+    expect(JSON.stringify(res)).toContain("awaiting_confirmation");
+    expect(calls).toEqual([]);
+  });
+
   it("uses a confirm card past 3 emails, still display only, naming the senders", async () => {
     const { deps, calls, cats } = setup();
     know(...emails.slice(0, 4).map((e) => e.id));

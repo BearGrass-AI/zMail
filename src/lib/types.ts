@@ -74,6 +74,18 @@ export interface Email {
   unsubscribe?: { http?: string; mailto?: string; oneClick: boolean };
   /** An automatic reply (out of office), from headers. */
   autoReply?: boolean;
+  /** Authentication and Reply-To, when the headers were present and well formed. */
+  security?: MailSecurity;
+}
+
+export type AuthResult = "pass" | "fail" | "softfail" | "neutral" | "none" | "temperror" | "permerror";
+
+/** What could be read off Authentication-Results and Reply-To. Absent fields were not a clean value. */
+export interface MailSecurity {
+  replyTo?: string;
+  spf?: AuthResult;
+  dkim?: AuthResult;
+  dmarc?: AuthResult;
 }
 
 /** Where the user historically filed mail from a sender. */
