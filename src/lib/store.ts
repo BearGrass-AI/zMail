@@ -25,6 +25,7 @@ import { AUTO_REPLY_MODEL, autoReplyTriage, isAutoReply } from "@/lib/mail/auto-
 import { NeedsPermissionError, type AutoReply } from "@/lib/mail/auto-replies";
 import { decisionProvider, generativeProvider } from "@/lib/ai/providers";
 import { nextRopeLineFlags, ownDomains } from "@/lib/ropeline";
+import { adviseInbox } from "@/lib/ropeline-questions";
 import { isDateCandidate } from "@/lib/date-candidates";
 import { clipText } from "@/lib/mail/clip-text";
 import { useSettings } from "@/lib/settings";
@@ -990,6 +991,8 @@ export const useMail = create<MailState>()((set, get) => {
               : (lastExamples = { emails, lessons, sections, result: senderExamples(held.size ? emails.filter((e) => !held.has(e.id)) : emails, lessons, sections) }).result;
           const r = await triageAll(provider, inbox, { me, folders, habits, sections, examples }, onResult);
           flush();
+          const advised = await adviseInbox(provider, inbox, get().ropelineFlags);
+          if (advised) set({ ropelineFlags: advised });
           // Every email failing is a failed sort; some failing keeps the rest and counts the misses.
           const error = r.lastError ?? "Sorting failed";
           if (r.failed && !r.done) set((s) => ({ sorting: { ...s.sorting, running: false, error } }));

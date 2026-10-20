@@ -56,6 +56,14 @@ export interface RopeLineFlag {
   fingerprint: string | null;
   /** Hash of the text this flag was read from. */
   key: string;
+  /** Advisory spam questions. Absent until a decision provider has answered. */
+  advice?: RopeLineAdvice;
+}
+
+export interface RopeLineAdvice {
+  advised: boolean;
+  alarms: { id: string; yes: boolean; probability: number }[];
+  family: string | null;
 }
 
 export interface RopeLineInput {
@@ -358,7 +366,24 @@ export function validRopeLineFlags(raw: unknown): Record<string, RopeLineFlag> {
       .slice(0, 60)
       .map((s) => ({ kind: s.kind, value: s.value === null ? null : s.value.slice(0, VALUE_MAX) }));
     const fingerprint = typeof f.fingerprint === "string" && HEX16.test(f.fingerprint) ? f.fingerprint : null;
-    out[id] = { flagged: signals.length > 0, signals, fingerprint, key };
+    const advice = validAdvice((f as { advice?: unknown }).advice);
+    out[id] = { flagged: signals.length > 0, signals, fingerprint, key, ...(advice ? { advice } : {}) };
   }
   return out;
+}
+
+function validAdvice(raw: unknown): RopeLineAdvice | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const a = raw as { advised?: unknown; alarms?: unknown; family?: unknown };
+  if (typeof a.advised !== "boolean" || !Array.isArray(a.alarms)) return undefined;
+  const alarms = a.alarms
+    .filter((x): x is { id: string; yes: boolean; probability: number } => {
+      if (!x || typeof x !== "object") return false;
+      const r = x as { id?: unknown; yes?: unknown; probability?: unknown };
+      return typeof r.id === "string" && typeof r.yes === "boolean" && typeof r.probability === "number" && r.probability >= 0 && r.probability <= 1;
+    })
+    .slice(0, 20)
+    .map((x) => ({ id: x.id.slice(0, 64), yes: x.yes, probability: x.probability }));
+  const family = typeof a.family === "string" && a.family.length <= 64 ? a.family : null;
+  return { advised: a.advised, alarms, family };
 }
