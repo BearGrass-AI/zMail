@@ -2,6 +2,7 @@
 
 import type { Attachment, CalEvent, CalendarInfo, Contact, Email, Folder, SystemFolder } from "@/lib/types";
 import { parseListUnsubscribe } from "@/lib/mail/unsubscribe";
+import { securityFromHeaders } from "@/lib/ropeline-security";
 import { isSingleMailbox } from "@/lib/mail/address";
 import { clipText } from "@/lib/mail/clip-text";
 
@@ -129,6 +130,7 @@ export function messageToEmail(accountId: string, m: GMsg, attachments: GAttachm
   const autoSubmitted = hdr("auto-submitted");
   const autoReply =
     (autoSubmitted !== undefined && autoSubmitted.trim().toLowerCase() !== "no") || hdr("x-autoreply") !== undefined || hdr("x-autorespond") !== undefined;
+  const security = securityFromHeaders((name) => hdr(name));
   return {
     id: m.id,
     accountId,
@@ -152,6 +154,7 @@ export function messageToEmail(accountId: string, m: GMsg, attachments: GAttachm
     rfc: { messageId: m.internetMessageId },
     ...(unsubscribe ? { unsubscribe } : {}),
     ...(autoReply ? { autoReply } : {}),
+    ...(security ? { security } : {}),
   };
 }
 

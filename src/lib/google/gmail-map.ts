@@ -4,6 +4,7 @@
 import type { Attachment, Contact, Email, Folder } from "@/lib/types";
 import type { InlineImage } from "@/lib/signature";
 import { parseListUnsubscribe } from "@/lib/mail/unsubscribe";
+import { securityFromHeaders } from "@/lib/ropeline-security";
 import { isSingleMailbox } from "@/lib/mail/address";
 import { clipText } from "@/lib/mail/clip-text";
 
@@ -262,6 +263,7 @@ export function messageToEmail(accountId: string, m: GMessage, userLabelFolder: 
     (autoSubmitted !== undefined && autoSubmitted.trim().toLowerCase() !== "no") ||
     header(m.payload, "X-Autoreply") !== undefined ||
     header(m.payload, "X-Autorespond") !== undefined;
+  const security = securityFromHeaders((name) => header(m.payload, name));
   return {
     id: m.id,
     accountId,
@@ -283,6 +285,7 @@ export function messageToEmail(accountId: string, m: GMessage, userLabelFolder: 
     rfc: { messageId: rawHeader(m.payload, "Message-ID"), references: rawHeader(m.payload, "References") },
     ...(unsubscribe ? { unsubscribe } : {}),
     ...(autoReply ? { autoReply } : {}),
+    ...(security ? { security } : {}),
   };
 }
 
