@@ -11,6 +11,25 @@ export const ROPELINE_TERMS_READY = false;
 
 export type RopeLineVerdict = "good" | "unsure" | "spam";
 
+/** A hosted call that does not answer in time is dropped. Mail stays where it is. */
+export const HOSTED_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(pending: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out")), ms);
+    pending.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 export function hostedCallAllowed(settings: { ropeLineHosted?: boolean; ropeLineHostedUrl?: string }, termsReady = ROPELINE_TERMS_READY): boolean {
   return termsReady && settings.ropeLineHosted === true && (settings.ropeLineHostedUrl ?? "").trim().length > 0;
 }
@@ -34,13 +53,16 @@ export async function askHosted(opts: {
   baseUrl: string;
   flag: Pick<RopeLineFlag, "fingerprint" | "signals">;
   post?: (url: string, body: { fingerprint: string | null; signals: RopeLineSignal[] }) => Promise<unknown>;
+  timeoutMs?: number;
 }): Promise<RopeLineVerdict | null> {
   if (!hostedCallAllowed({ ropeLineHosted: opts.enabled, ropeLineHostedUrl: opts.baseUrl }, opts.termsReady)) return null;
   if (!opts.flag.fingerprint && !opts.flag.signals.length) return null;
   const body = hostedBody(opts.flag);
   const url = opts.baseUrl.trim().replace(/\/+$/, "") + "/v1/verdict";
+  const timeoutMs = opts.timeoutMs ?? HOSTED_TIMEOUT_MS;
   try {
-    const res = opts.post ? await opts.post(url, body) : await request<unknown>("POST", url, { body });
+    const pending = opts.post ? opts.post(url, body) : request<unknown>("POST", url, { body });
+    const res = await withTimeout(pending, timeoutMs);
     return verdictOf(res);
   } catch (err) {
     console.error("[ropeline]", err);

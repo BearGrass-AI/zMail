@@ -8,6 +8,7 @@ import { extOf } from "./types";
 import { pushConfirmCard } from "./confirm";
 import { refsFrom } from "./ids";
 import { takeDirect } from "./budget";
+import { heldForConfirm } from "@/lib/ropeline-security";
 import { parseLocal } from "@/lib/dates/local";
 
 export interface SnoozeDeps {
@@ -103,7 +104,7 @@ export const snoozeModule: ToolModule = {
       if (!emails.length) return { error: "None of those emails were found." };
       const ids = emails.map((e) => e.id);
       const when = whenText(until);
-      if (until - now <= DIRECT_MAX_MS && takeDirect(ids.length)) {
+      if (until - now <= DIRECT_MAX_MS && !emails.some((e) => heldForConfirm(e)) && takeDirect(ids.length)) {
         // Undo puts back an earlier snooze time instead of dropping it.
         const prev = before(ids, d);
         d.snooze(ids, until);
@@ -129,7 +130,7 @@ export const snoozeModule: ToolModule = {
       const back = emails.filter((e) => e.id in snoozed);
       const ids = back.map((e) => e.id);
       if (!ids.length) return { status: "none_snoozed", count: 0 };
-      if (!takeDirect(ids.length)) {
+      if (back.some((e) => heldForConfirm(e)) || !takeDirect(ids.length)) {
         pushConfirmCard({
           module: "snooze",
           action: "unsnooze",

@@ -11,6 +11,7 @@ import { pathOf, pendingFolderCard, resolveFolder, type CreateFolderPayload } fr
 import type { ToolDeps } from "../tools";
 import { pushConfirmCard } from "./confirm";
 import { takeDirect } from "./budget";
+import { heldForConfirm } from "@/lib/ropeline-security";
 import { refsFrom } from "./ids";
 import { extOf, type ToolModule } from "./types";
 
@@ -411,7 +412,8 @@ export const organizeModule: ToolModule = {
       const ids = targetIds(a);
       // Teaching is a lasting change to how future mail is sorted, so only a click on a card does it.
       const teach = a.teach === true;
-      if (!teach && takeDirect(ids.length)) {
+      const known = o.inbox().filter((e) => ids.includes(e.id));
+      if (!teach && !known.some((e) => heldForConfirm(e)) && takeDirect(ids.length)) {
         const snap = o.snapshotCategories(ids);
         o.setCategory(ids, category, false);
         step(`Set ${plural(ids.length, "email")} to ${category}`);

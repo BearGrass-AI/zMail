@@ -48,6 +48,19 @@ describe("hosted verdict", () => {
     expect(sent).toEqual(body);
   });
 
+  it("fails open when the verdict service does not answer", async () => {
+    const flag = flagFor(mail(), []);
+    const verdict = await askHosted({
+      enabled: true,
+      termsReady: true,
+      baseUrl: "https://verdict.example",
+      flag,
+      post: () => new Promise(() => {}),
+      timeoutMs: 30,
+    });
+    expect(verdict).toBeNull();
+  });
+
   it("does not call out from sort's helper while the pages are missing", async () => {
     const email = mail();
     const post = vi.fn(async () => ({ verdict: "good" }));
