@@ -13,6 +13,7 @@ import { useMail } from "@/lib/store";
 import type { Lesson } from "./learning";
 import type { DraftSignature, MailState, Resolution } from "./types";
 import { held } from "./held";
+import { validRopeLineFlags, type RopeLineFlag } from "@/lib/ropeline";
 import { DRAFT_SIGNATURES_CAP, validDraftSignatures } from "./draft-signatures";
 
 export const SNAPSHOT_KEY = "state.v1";
@@ -48,6 +49,7 @@ export interface Snapshot {
   noDateSenders?: Record<string, true>;
   dateDismissals?: Record<string, string[]>;
   resolved?: Record<string, Resolution>;
+  ropelineFlags?: Record<string, RopeLineFlag>;
 }
 
 /**
@@ -94,6 +96,7 @@ const SAVED_FROM = {
   noDateSenders: "noDateSenders",
   dateDismissals: "dateDismissals",
   resolved: "resolved",
+  ropelineFlags: "ropelineFlags",
 } as const satisfies Record<Exclude<keyof Snapshot, "signatures">, keyof MailState>;
 type SavedKey = (typeof SAVED_FROM)[keyof typeof SAVED_FROM];
 
@@ -133,6 +136,7 @@ export function snapshot(s: Pick<MailState, SavedKey | "emails">): Required<Omit
     noDateSenders: s.noDateSenders,
     dateDismissals: s.dateDismissals,
     resolved: capResults(s.resolved, emailIds),
+    ropelineFlags: capResults(s.ropelineFlags, emailIds),
   };
 }
 
@@ -168,6 +172,7 @@ export function restore(snap: Snapshot, _habits: Map<string, SenderHabit>) {
       dateFinds: snap.dateFinds ?? {},
       noDateSenders: snap.noDateSenders ?? {},
       resolved: snap.resolved ?? {},
+      ropelineFlags: validRopeLineFlags(snap.ropelineFlags),
       dateDismissals: Object.fromEntries(
         Object.entries(snap.dateDismissals ?? {}).map(([k, v]) => [k, Array.isArray(v) ? v : []]),
       ),

@@ -12,6 +12,7 @@ import type { MailSection } from "@/lib/sections";
 import type { MailSignature, SignatureDefaults } from "@/lib/signature";
 import type { ScheduledSend } from "@/lib/mail/scheduled";
 import type { Lesson } from "./learning";
+import type { RopeLineFlag } from "@/lib/ropeline";
 
 export type View =
   | { kind: "brief" }
@@ -129,6 +130,8 @@ export interface MailState {
   autoRules: AutoRule[];
   /** Ids an automatic rule already acted on; stops Undo from being re-applied. */
   autoHandled: Record<string, true>;
+  /** RopeLine's on-device reading of inbox mail. A flag does not move the message. */
+  ropelineFlags: Record<string, RopeLineFlag>;
   habits: Map<string, SenderHabit>;
   /** Email ids whose folder suggestion the user dismissed. */
   dismissed: Set<string>;

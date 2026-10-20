@@ -24,6 +24,7 @@ import { HttpError } from "@/lib/transport";
 import { AUTO_REPLY_MODEL, autoReplyTriage, isAutoReply } from "@/lib/mail/auto-reply";
 import { NeedsPermissionError, type AutoReply } from "@/lib/mail/auto-replies";
 import { decisionProvider, generativeProvider } from "@/lib/ai/providers";
+import { nextRopeLineFlags, ownDomains } from "@/lib/ropeline";
 import { isDateCandidate } from "@/lib/date-candidates";
 import { clipText } from "@/lib/mail/clip-text";
 import { useSettings } from "@/lib/settings";
@@ -602,6 +603,7 @@ export const useMail = create<MailState>()((set, get) => {
     rules: {},
     autoRules: [],
     autoHandled: {},
+    ropelineFlags: {},
     habits: new Map(),
     dismissed: new Set(),
     snoozed: {},
@@ -926,6 +928,15 @@ export const useMail = create<MailState>()((set, get) => {
       // waiter re-checks after waking: the first to wake starts its sort and the rest wait on that.
       while (sorting) await sorting.catch(() => {});
       const run: Promise<void> = (async () => {
+        const before = get();
+        const stamped = nextRopeLineFlags(
+          before.emails,
+          inboxFolderIds(before.folders),
+          ownDomains(before.accounts),
+          before.ropelineFlags,
+          held,
+        );
+        if (stamped) set({ ropelineFlags: stamped });
         const { emails, folders, habits, me, triage, sections, lessons } = get();
         const only = opts?.ids && new Set(opts.ids);
         const inboxIds = inboxFolderIds(folders);
