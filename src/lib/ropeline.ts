@@ -62,6 +62,8 @@ export interface RopeLineFlag {
   verdict?: "good" | "unsure" | "spam";
   /** Shown when a confident spam verdict was moved to Spam. */
   reason?: string;
+  /** The person's answers to the on-screen questions. Checking one does not move mail. */
+  checks?: Record<string, boolean>;
 }
 
 export interface RopeLineAdvice {
@@ -374,9 +376,19 @@ export function validRopeLineFlags(raw: unknown): Record<string, RopeLineFlag> {
     const verdict = (f as { verdict?: unknown }).verdict;
     const word = verdict === "good" || verdict === "unsure" || verdict === "spam" ? verdict : undefined;
     const reason = typeof (f as { reason?: unknown }).reason === "string" ? (f as { reason: string }).reason.slice(0, 200) : undefined;
-    out[id] = { flagged: signals.length > 0, signals, fingerprint, key, ...(advice ? { advice } : {}), ...(word ? { verdict: word } : {}), ...(reason ? { reason } : {}) };
+    const checks = validChecks((f as { checks?: unknown }).checks);
+    out[id] = { flagged: signals.length > 0, signals, fingerprint, key, ...(advice ? { advice } : {}), ...(word ? { verdict: word } : {}), ...(reason ? { reason } : {}), ...(checks ? { checks } : {}) };
   }
   return out;
+}
+
+function validChecks(raw: unknown): Record<string, boolean> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(raw).slice(0, 12)) {
+    if (typeof v === "boolean" && /^[a-z0-9-]{1,40}$/.test(k)) out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 function validAdvice(raw: unknown): RopeLineAdvice | undefined {

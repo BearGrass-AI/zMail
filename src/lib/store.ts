@@ -24,7 +24,7 @@ import { HttpError } from "@/lib/transport";
 import { AUTO_REPLY_MODEL, autoReplyTriage, isAutoReply } from "@/lib/mail/auto-reply";
 import { NeedsPermissionError, type AutoReply } from "@/lib/mail/auto-replies";
 import { decisionProvider, generativeProvider } from "@/lib/ai/providers";
-import { nextRopeLineFlags, ownDomains } from "@/lib/ropeline";
+import { nextRopeLineFlags, ownDomains, ropeLineKey } from "@/lib/ropeline";
 import { adviseInbox } from "@/lib/ropeline-questions";
 import { attachVerdicts } from "@/lib/ropeline-hosted";
 import { confidentSpamIds, SPAM_REASON } from "@/lib/ropeline-act";
@@ -1283,6 +1283,21 @@ export const useMail = create<MailState>()((set, get) => {
     },
     trash: (ids) => toSystem(ids, "trash"),
     spam: (ids) => toSystem(ids, "spam"),
+    setRopeLineCheck(emailId, questionId, on) {
+      if (!/^[a-z0-9-]{1,40}$/.test(questionId)) return;
+      set((s) => {
+        const e = s.emails.find((x) => x.id === emailId);
+        const prev = s.ropelineFlags[emailId];
+        const base = prev ?? (e ? { flagged: false, signals: [], fingerprint: null, key: ropeLineKey(e) } : undefined);
+        if (!base) return s;
+        return {
+          ropelineFlags: {
+            ...s.ropelineFlags,
+            [emailId]: { ...base, checks: { ...base.checks, [questionId]: on } },
+          },
+        };
+      });
+    },
 
     async ensureEmail(ref) {
       const have = get().emails.find((e) => e.id === ref.id && !e.partial);

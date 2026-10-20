@@ -16,6 +16,7 @@ import { DateChip, SectionTag } from "../date-chip";
 import { Flag } from "lucide-react";
 import { RowCheck, useRowSelect } from "../selection";
 import { AccountDot } from "../account-switcher";
+import { RopeLineBadge } from "./ropeline-screen";
 
 export function useOneLiner(email: Email, enabled = true) {
   const [line, setLine] = useState(() => cachedSummary(email.id));
@@ -169,6 +170,7 @@ export function CompactRow({ email, showSnippet, order, flag }: { email: Email; 
             {email.subject}
             {showSnippet && <span className="text-foreground/40"> — {email.snippet}</span>}
           </span>
+          <RopeLineBadge email={email} />
           {email.starred && <Star className="size-3 shrink-0 fill-amber-400 text-amber-400" />}
           {!!email.attachments?.length && <Paperclip className="size-3 shrink-0 text-foreground/40" />}
           <span className={cn("flex items-center gap-1.5 transition-[margin] duration-150", !sel.selecting && "group-hover:mr-9")}>
@@ -231,7 +233,10 @@ export const InboxRow = memo(function InboxRow({ email }: { email: Email }) {
                 {relTime(email.date)}
               </span>
             </div>
-            <div className={cn("truncate text-[13px]", email.unread ? "text-foreground" : "text-foreground/80")}>{email.subject}</div>
+            <div className={cn("flex items-center gap-2 truncate text-[13px]", email.unread ? "text-foreground" : "text-foreground/80")}>
+              <span className="truncate">{email.subject}</span>
+              <RopeLineBadge email={email} />
+            </div>
             <div className="truncate text-[12.5px] text-foreground/45">{email.snippet}</div>
             <div className="mt-1.5 flex flex-wrap gap-1.5 empty:hidden">
               <DateChip email={email} />
