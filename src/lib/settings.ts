@@ -94,6 +94,10 @@ export interface Settings {
   webSearch: { builtin: boolean; service: "none" | "brave" | "tavily" };
   /** Banners for new mail zMail sorts into Needs you, and the dock badge. */
   notifications: NotificationPrefs;
+  /** Ask a RopeLine verdict service. Stays dark until the Terms and Privacy pages exist. */
+  ropeLineHosted: boolean;
+  /** Address of that service, with no path. Empty until the user sets one. */
+  ropeLineHostedUrl: string;
 }
 
 interface SettingsStore extends Settings {
@@ -156,6 +160,8 @@ export const useSettings = create<SettingsStore>()(
         mutedAccounts: [],
         asked: false,
       },
+      ropeLineHosted: false,
+      ropeLineHostedUrl: "",
       set: (patch) => set(patch),
       setHue: (key, hue) =>
         set((s) => {

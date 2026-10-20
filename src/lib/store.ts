@@ -26,6 +26,7 @@ import { NeedsPermissionError, type AutoReply } from "@/lib/mail/auto-replies";
 import { decisionProvider, generativeProvider } from "@/lib/ai/providers";
 import { nextRopeLineFlags, ownDomains } from "@/lib/ropeline";
 import { adviseInbox } from "@/lib/ropeline-questions";
+import { attachVerdicts } from "@/lib/ropeline-hosted";
 import { isDateCandidate } from "@/lib/date-candidates";
 import { clipText } from "@/lib/mail/clip-text";
 import { useSettings } from "@/lib/settings";
@@ -993,6 +994,8 @@ export const useMail = create<MailState>()((set, get) => {
           flush();
           const advised = await adviseInbox(provider, inbox, get().ropelineFlags);
           if (advised) set({ ropelineFlags: advised });
+          const judged = await attachVerdicts(get().ropelineFlags, inbox, useSettings.getState());
+          if (judged) set({ ropelineFlags: judged });
           // Every email failing is a failed sort; some failing keeps the rest and counts the misses.
           const error = r.lastError ?? "Sorting failed";
           if (r.failed && !r.done) set((s) => ({ sorting: { ...s.sorting, running: false, error } }));

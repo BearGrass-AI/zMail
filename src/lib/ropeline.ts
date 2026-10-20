@@ -58,6 +58,8 @@ export interface RopeLineFlag {
   key: string;
   /** Advisory spam questions. Absent until a decision provider has answered. */
   advice?: RopeLineAdvice;
+  /** Hosted verdict. Absent until that call is allowed and has answered. */
+  verdict?: "good" | "unsure" | "spam";
 }
 
 export interface RopeLineAdvice {
@@ -367,7 +369,9 @@ export function validRopeLineFlags(raw: unknown): Record<string, RopeLineFlag> {
       .map((s) => ({ kind: s.kind, value: s.value === null ? null : s.value.slice(0, VALUE_MAX) }));
     const fingerprint = typeof f.fingerprint === "string" && HEX16.test(f.fingerprint) ? f.fingerprint : null;
     const advice = validAdvice((f as { advice?: unknown }).advice);
-    out[id] = { flagged: signals.length > 0, signals, fingerprint, key, ...(advice ? { advice } : {}) };
+    const verdict = (f as { verdict?: unknown }).verdict;
+    const word = verdict === "good" || verdict === "unsure" || verdict === "spam" ? verdict : undefined;
+    out[id] = { flagged: signals.length > 0, signals, fingerprint, key, ...(advice ? { advice } : {}), ...(word ? { verdict: word } : {}) };
   }
   return out;
 }
