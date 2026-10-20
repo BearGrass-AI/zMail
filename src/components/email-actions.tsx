@@ -59,6 +59,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { BUCKET_META, CATEGORY_META, SECTION_ICON } from "@/lib/meta";
 import { Tile, hue } from "./meta";
+import { disposalNeedsConfirm } from "@/lib/ropeline-security";
 
 /** Category names as the Can go bundles show them. */
 export const CATEGORY_NAMES: Record<Category, string> = {
@@ -179,9 +180,29 @@ export function emailActions() {
         toast("Already in Trash");
         return Promise.resolve();
       }
-      return withUndo(rest, `Deleted${n(rest)}`, "deleted", () => s.trash(rest));
+      const go = () => withUndo(rest, `Deleted${n(rest)}`, "deleted", () => live().trash(rest));
+      if (disposalNeedsConfirm(rest, st.emails, st.ropelineFlags)) {
+        toast(rest.length === 1 ? "RopeLine is holding this message" : `RopeLine is holding ${rest.length} messages`, {
+          description: "Trash it anyway? Nothing has been deleted yet.",
+          action: { label: "Trash", onClick: () => void go() },
+        });
+        return Promise.resolve();
+      }
+      return go();
     },
-    spam: (ids: string[]) => withUndo(take(ids), `Marked as spam`, "marked as spam", () => s.spam(ids)),
+    spam: (ids: string[]) => {
+      const taken = take(ids);
+      const go = () => withUndo(taken, `Marked as spam`, "marked as spam", () => live().spam(taken));
+      const st = live();
+      if (disposalNeedsConfirm(taken, st.emails, st.ropelineFlags)) {
+        toast(taken.length === 1 ? "RopeLine is holding this message" : `RopeLine is holding ${taken.length} messages`, {
+          description: "Mark it as spam anyway? Nothing has been moved yet.",
+          action: { label: "Spam", onClick: () => void go() },
+        });
+        return Promise.resolve();
+      }
+      return go();
+    },
     move: (ids: string[], folderId: string) => {
       take(ids);
       const folder = live().folders.find((f) => f.id === folderId);

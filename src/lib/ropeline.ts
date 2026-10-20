@@ -62,7 +62,7 @@ export interface RopeLineFlag {
   verdict?: "good" | "unsure" | "spam";
   /** Shown when a confident spam verdict was moved to Spam. */
   reason?: string;
-  /** The person's answers to the on-screen questions. Checking one does not move mail. */
+  /** The person's answers to the on-screen questions. Every answer checked releases the hold. Mail stays put. */
   checks?: Record<string, boolean>;
 }
 

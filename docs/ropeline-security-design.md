@@ -18,15 +18,15 @@ zMail holds a person's real mailbox and an assistant that can change mail. RopeL
 
 **Reply-To mismatch.** If Reply-To is a single mailbox and its domain is not the From domain, that is a finding. A line break in the header is refused, so a header cannot smuggle a second line.
 
-**Invoice and payroll fraud.** Words about an invoice, payroll, a wire, or a direct deposit, together with a look-alike domain, a Reply-To mismatch, or a DMARC fail, are a hold. The questions ask whether the invoice was expected and whether to verify on another channel before paying. Checking a question records the answer. It does not release the hold and it does not move the mail.
+**Invoice and payroll fraud.** Words about an invoice, payroll, a wire, or a direct deposit, together with a look-alike domain, a Reply-To mismatch, or a DMARC fail, are a hold. The questions ask whether the invoice was expected and whether to verify on another channel before paying. Checking a question records the answer. Answering every question on that message releases the hold. A toast offers Undo, which puts the answers back and the hold with them. The message stays in its folder either way.
 
-**Prompt injection.** Mail is data for the assistant, not instructions. Phrases aimed at an automated reader ("ignore previous instructions", "system prompt", "archive all emails") put the message on hold. The assistant's act tool can otherwise archive or relabel up to three emails with no confirm card. Mail that RopeLine marks warn or hold always gets that card, including archive and set-lane. The text shown to the model has direction and zero-width characters removed and is labeled as untrusted data.
+**Prompt injection.** Mail is data for the assistant, not instructions. Phrases aimed at an automated reader ("ignore previous instructions", "system prompt", "archive all emails") put the message on hold. The assistant's act tool can otherwise archive or relabel up to three emails with no confirm card. Mail that RopeLine marks warn or hold always gets that card, including archive, set-lane, snooze, category, and dismissed folder suggestions. A message the assistant has not loaded is treated the same way: it has not been read or screened, so the change waits. The text shown to the model has direction and zero-width characters removed and is labeled as untrusted data.
 
 ## Levels
 
-- **Clear.** No finding. A quiet RopeLine line.
-- **Warn.** Something to look at. The message stays where it is.
-- **Hold.** Quarantine as a warning state, not a folder. The message stays where it is. The assistant must ask before it changes the message. Nothing is trashed.
+- **Clear.** No finding, or every question on a warn or hold has been answered. A quiet RopeLine line. Unchecking a question puts the warn or hold back.
+- **Warn.** Something to look at. The message stays where it is. Trash and Spam ask first, in the button, the shortcut, and the bulk bar.
+- **Hold.** Quarantine as a warning state, not a folder. The message stays where it is. Trash and Spam ask first. The assistant must ask before it changes the message, including a message it has not loaded. Nothing is trashed until the person confirms.
 
 ## What stays on this Mac
 
@@ -53,6 +53,8 @@ pnpm tauri dev
 ```
 
 RopeLine's on-device reading runs by itself. In Settings, Sorting & Rules, leave "Ask RopeLine for a verdict" off. Leave "Move confident spam to Spam" off. The hosted call stays off until the Terms and Privacy pages exist even if that first switch is turned on.
+
+On a Check this or Hold message, Trash and Spam ask first. Nothing moves until that click. Answering every question on the message releases the hold, and the toast Undo puts the hold back. The assistant also waits when it has not loaded the message.
 
 Watch for these made-up messages. None of them should be deleted.
 

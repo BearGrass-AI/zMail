@@ -135,6 +135,14 @@ describe("approval gate", () => {
     expect(deps.bulkCalls).toHaveLength(0);
   });
 
+  it("asks before changing a message the read did not return", async () => {
+    const deps = fakeDeps({ loadHeaders: async () => [] });
+    await executeTool(call("search_mail", { query: { from: "amazon.com" } }), deps);
+    const res = (await executeTool(call("act", { ids: ["m0"], op: "archive" }), deps)).content as { status?: string };
+    expect(res.status).toBe("awaiting_confirmation");
+    expect(deps.bulkCalls).toHaveLength(0);
+  });
+
   it("confirms an archive of 4 or more, and any trash", async () => {
     const deps = fakeDeps();
     const { set_id } = (await executeTool(call("search_mail", { query: { from: "amazon.com" } }), deps)).content as { set_id: string };

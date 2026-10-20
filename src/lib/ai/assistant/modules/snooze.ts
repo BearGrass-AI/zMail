@@ -103,8 +103,10 @@ export const snoozeModule: ToolModule = {
       const emails = resolve(a, d);
       if (!emails.length) return { error: "None of those emails were found." };
       const ids = emails.map((e) => e.id);
+      const asked = new Set(refsFrom(a).map((r) => r.id));
+      const missing = [...asked].some((id) => !emails.some((e) => e.id === id));
       const when = whenText(until);
-      if (until - now <= DIRECT_MAX_MS && !emails.some((e) => heldForConfirm(e)) && takeDirect(ids.length)) {
+      if (until - now <= DIRECT_MAX_MS && !missing && !emails.some((e) => heldForConfirm(e)) && takeDirect(ids.length)) {
         // Undo puts back an earlier snooze time instead of dropping it.
         const prev = before(ids, d);
         d.snooze(ids, until);
@@ -130,7 +132,9 @@ export const snoozeModule: ToolModule = {
       const back = emails.filter((e) => e.id in snoozed);
       const ids = back.map((e) => e.id);
       if (!ids.length) return { status: "none_snoozed", count: 0 };
-      if (back.some((e) => heldForConfirm(e)) || !takeDirect(ids.length)) {
+      const asked = refsFrom(a).map((r) => r.id);
+      const missing = asked.some((id) => !emails.some((e) => e.id === id));
+      if (missing || back.some((e) => heldForConfirm(e)) || !takeDirect(ids.length)) {
         pushConfirmCard({
           module: "snooze",
           action: "unsnooze",

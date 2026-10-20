@@ -412,8 +412,8 @@ export const organizeModule: ToolModule = {
       const ids = targetIds(a);
       // Teaching is a lasting change to how future mail is sorted, so only a click on a card does it.
       const teach = a.teach === true;
-      const known = o.inbox().filter((e) => ids.includes(e.id));
-      if (!teach && !known.some((e) => heldForConfirm(e)) && takeDirect(ids.length)) {
+      const known = new Map(o.inbox().map((e) => [e.id, e]));
+      if (!teach && !ids.some((id) => heldForConfirm(known.get(id))) && takeDirect(ids.length)) {
         const snap = o.snapshotCategories(ids);
         o.setCategory(ids, category, false);
         step(`Set ${plural(ids.length, "email")} to ${category}`);
@@ -580,7 +580,8 @@ export const organizeModule: ToolModule = {
 
     async dismiss_suggestions(a, deps) {
       const ids = targetIds({ ids: a.ids });
-      if (!takeDirect(ids.length)) {
+      const known = new Map(d(deps).inbox().map((e) => [e.id, e]));
+      if (ids.some((id) => heldForConfirm(known.get(id))) || !takeDirect(ids.length)) {
         pushConfirmCard({
           module: ID,
           action: "dismiss_suggestions",

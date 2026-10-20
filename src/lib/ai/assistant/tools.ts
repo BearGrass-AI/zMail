@@ -446,7 +446,8 @@ async function run(name: string, a: Record<string, unknown>, deps: ToolDeps): Pr
         try {
           preview = await deps.loadHeaders(refs);
           const flags = useMail.getState().ropelineFlags;
-          held = preview.some((e) => heldForConfirm(e, flags?.[e.id]));
+          const byId = new Map(preview.map((e) => [e.id, e]));
+          held = refs.some((r) => heldForConfirm(byId.get(r.id), flags?.[r.id]));
         } catch {
           held = true;
         }

@@ -21,6 +21,8 @@ vi.mock("@/lib/accounts", () => ({ loadRegistry: async () => [], saveRegistry: a
 const { useMail } = await import("@/lib/store");
 const { RopeLineScreen } = await import("@/components/mail/ropeline-screen");
 const { validRopeLineFlags } = await import("@/lib/ropeline");
+const { screenMail } = await import("@/lib/ropeline-security");
+const { toast } = await import("sonner");
 
 const email = {
   id: "e1",
@@ -69,5 +71,17 @@ describe("RopeLine panel", () => {
     expect(useMail.getState().ropelineFlags.e1?.checks?.["expect-invoice"]).toBe(true);
     expect(useMail.getState().emails[0].folderId).toBe("g:INBOX");
     expect(validRopeLineFlags(useMail.getState().ropelineFlags).e1.checks).toEqual({ "expect-invoice": true });
+  });
+
+  it("releases the hold when every question is checked, and undo restores it", () => {
+    useMail.setState({ emails: [email], ropelineFlags: {} });
+    for (const id of ["expect-invoice", "know-sender", "other-channel"]) useMail.getState().setRopeLineCheck("e1", id, true);
+    expect(screenMail(email, useMail.getState().ropelineFlags.e1).level).toBe("clear");
+    const note = vi.mocked(toast).mock.calls.find((c) => c[0] === "Hold released");
+    const opts = note?.[1] as { action?: { label?: string; onClick?: () => void } } | undefined;
+    expect(opts?.action?.label).toBe("Undo");
+    act(() => opts?.action?.onClick?.());
+    expect(screenMail(email, useMail.getState().ropelineFlags.e1).level).toBe("quarantine");
+    expect(useMail.getState().emails[0].folderId).toBe("g:INBOX");
   });
 });

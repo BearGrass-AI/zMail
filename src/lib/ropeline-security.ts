@@ -21,6 +21,8 @@ export interface CyberQuestion {
 
 export interface Screening {
   level: ScreenLevel;
+  /** True when every question is checked. The findings stay; the hold does not. */
+  released: boolean;
   findings: SecurityFinding[];
   questions: CyberQuestion[];
   reason: string;
@@ -120,7 +122,7 @@ function push(findings: SecurityFinding[], id: string, title: string, detail: st
 /** The on-device reading. It does not move mail and it does not open anything. */
 export function screenMail(
   email: Pick<Email, "from" | "subject" | "text" | "attachments" | "security">,
-  flag?: Pick<RopeLineFlag, "signals" | "advice" | "verdict" | "reason">,
+  flag?: Pick<RopeLineFlag, "signals" | "advice" | "verdict" | "reason" | "checks">,
 ): Screening {
   const findings: SecurityFinding[] = [];
   const text = `${email.subject ?? ""}\n${email.text ?? ""}`;
@@ -157,12 +159,33 @@ export function screenMail(
   if (level !== "clear") questions.push({ id: "know-sender", prompt: "Does the sender match someone you know?" });
   if (payment || level === "quarantine") questions.push({ id: "other-channel", prompt: "Verify by another channel before paying." });
   if (riskyFile) questions.push({ id: "expect-file", prompt: "Were you expecting this attachment?" });
-  const reason = level === "clear" ? "Nothing here needs a check." : findings[0].title;
-  return { level, findings, questions, reason: level === "quarantine" ? findings.find((f) => ["dmarc", "attachment", "bec", "injection"].includes(f.id))?.title ?? reason : reason };
+  const released = questions.length > 0 && questions.every((q) => flag?.checks?.[q.id] === true);
+  const shown: ScreenLevel = released ? "clear" : level;
+  const reason = released
+    ? "You answered every question. The hold is released."
+    : shown === "clear"
+      ? "Nothing here needs a check."
+      : shown === "quarantine"
+        ? findings.find((f) => ["dmarc", "attachment", "bec", "injection"].includes(f.id))?.title ?? findings[0].title
+        : findings[0].title;
+  return { level: shown, findings, questions, reason, released };
 }
 
-/** True when the assistant must ask before it changes this message. A missing message is not held. */
-export function heldForConfirm(email: Pick<Email, "from" | "subject" | "text" | "attachments" | "security"> | undefined, flag?: RopeLineFlag): boolean {
-  if (!email) return false;
+/** True when the assistant must ask before it changes this message. Mail that is not loaded has not been read or screened, so it waits. */
+export function heldForConfirm(email: Pick<Email, "from" | "subject" | "text" | "attachments" | "security" | "partial"> | undefined, flag?: RopeLineFlag): boolean {
+  if (!email) return true;
+  if (email.partial && !(typeof email.text === "string" && email.text.length > 0)) return true;
   return screenMail(email, flag).level !== "clear";
+}
+
+/** Trash and Spam ask first when any of these messages is on warn or hold. */
+export function disposalNeedsConfirm(
+  ids: string[],
+  emails: Pick<Email, "id" | "from" | "subject" | "text" | "attachments" | "security">[],
+  flags: Record<string, RopeLineFlag | undefined>,
+): boolean {
+  return ids.some((id) => {
+    const email = emails.find((e) => e.id === id);
+    return !!email && screenMail(email, flags[id]).level !== "clear";
+  });
 }

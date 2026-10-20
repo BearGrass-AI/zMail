@@ -25,6 +25,7 @@ import { AUTO_REPLY_MODEL, autoReplyTriage, isAutoReply } from "@/lib/mail/auto-
 import { NeedsPermissionError, type AutoReply } from "@/lib/mail/auto-replies";
 import { decisionProvider, generativeProvider } from "@/lib/ai/providers";
 import { nextRopeLineFlags, ownDomains, ropeLineKey } from "@/lib/ropeline";
+import { screenMail } from "@/lib/ropeline-security";
 import { adviseInbox } from "@/lib/ropeline-questions";
 import { attachVerdicts } from "@/lib/ropeline-hosted";
 import { confidentSpamIds, SPAM_REASON } from "@/lib/ropeline-act";
@@ -1285,18 +1286,29 @@ export const useMail = create<MailState>()((set, get) => {
     spam: (ids) => toSystem(ids, "spam"),
     setRopeLineCheck(emailId, questionId, on) {
       if (!/^[a-z0-9-]{1,40}$/.test(questionId)) return;
-      set((s) => {
-        const e = s.emails.find((x) => x.id === emailId);
-        const prev = s.ropelineFlags[emailId];
-        const base = prev ?? (e ? { flagged: false, signals: [], fingerprint: null, key: ropeLineKey(e) } : undefined);
-        if (!base) return s;
-        return {
-          ropelineFlags: {
-            ...s.ropelineFlags,
-            [emailId]: { ...base, checks: { ...base.checks, [questionId]: on } },
+      const s = get();
+      const e = s.emails.find((x) => x.id === emailId);
+      const prev = s.ropelineFlags[emailId] ?? (e ? { flagged: false, signals: [], fingerprint: null, key: ropeLineKey(e) } : undefined);
+      if (!prev) return;
+      const before = { ...prev.checks };
+      const next = { ...prev, checks: { ...before, [questionId]: on } };
+      const wasHeld = e ? screenMail(e, prev).level !== "clear" : false;
+      const nowHeld = e ? screenMail(e, next).level !== "clear" : false;
+      set({ ropelineFlags: { ...s.ropelineFlags, [emailId]: next } });
+      if (wasHeld && !nowHeld) {
+        toast("Hold released", {
+          description: "You answered every RopeLine question.",
+          action: {
+            label: "Undo",
+            onClick: () =>
+              set((st) => {
+                const cur = st.ropelineFlags[emailId];
+                if (!cur) return st;
+                return { ropelineFlags: { ...st.ropelineFlags, [emailId]: { ...cur, checks: before } } };
+              }),
           },
-        };
-      });
+        });
+      }
     },
 
     async ensureEmail(ref) {
